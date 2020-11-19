@@ -14,7 +14,7 @@
 //! or you want to explain your approach, write it down after the comments
 //! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
-//! COMPLETED: ?
+//! COMPLETED: NO
 //!
 //! COMMENTS:
 //!
@@ -26,19 +26,155 @@
 #![allow(unused_imports)]
 // We import std::error and std::format so we can say error::Error instead of
 // std::error::Error, etc.
-use std::error;
+use std::{error, io};
 use std::fmt;
+use std::path::Path;
 
 // If you want to import things from the API crate, do so as follows:
-use cplfs_api::fs::FileSysSupport;
+use cplfs_api::{controller::Device, fs::FileSysSupport};
+// import SuperBlock
+use cplfs_api::types::SuperBlock;
+// import BlockSupport
+use cplfs_api::fs::BlockSupport;
 use cplfs_api::types::{Block, Inode};
+
+// use auxiliary package thiserror to make the definition of errors easier
+use thiserror::Error;
 
 /// You are free to choose the name for your file system. As we will use
 /// automated tests when grading your assignment, indicate here the name of
 /// your file system data type so we can just use `FSName` instead of
 /// having to manually figure out your file system name.
 /// **TODO**: replace the below type by the type of your file system
-pub type FSName = ();
+pub type FSName = CustomFileSystem;
+
+// testing in making a custom type
+struct CustomFileSystem {
+    device: Device 
+}
+
+impl CustomFileSystem {
+    
+}
+
+#[derive(Error, Debug)]
+/// Custom error type for
+pub enum BlockSupportError {
+    #[error("invalid SuperBlock was passed")]
+    /// Error when an invalid superblock is passed 
+    /// to a function that needs it
+    InvalidSuperBlock,
+}
+
+impl FileSysSupport for CustomFileSystem {
+
+    /*
+    Data blocks are a specific type of blocks that make up the contents of files. They
+    are stored on the disk, in a region called the data block region.
+    Call nbdatablocks the total number of data blocks in the file system. An entire
+    disk block is then provided on the disk for each data block, from block 0 to block
+    nbdatablocks − 1.
+    */
+
+    /*
+    To keep track of which blocks in the data block region have been allocated and
+    which ones are still free, the disk contains a second region called the bitmap region,
+    which contains a single bit for each data block, again from 0 to nbdatablocks − 1.
+    If the bit corresponding to a certain data block is set to 1, then this block is currently
+    in use. If the bit is set to 0, then the block is free and can be allocated for various
+    purposes 
+    */
+
+    /*
+    Second, we use a so-called superblock to keep track of all the metadata of the file
+    system. The block layer has provisions to read and write this superblock. 
+    That being said, the superblock is sufficiently important and frequently accessed to warrant keeping 
+    a read-out version cached in the kernel (in our case, as we will not
+    model an entire operating system; caching happens in the block layer). 
+    The superblock is stored in the very first block of our device image, so that the file system
+    knows where to find it at boot time.
+    */
+
+    /*
+    Inodes Builds the well-known Unix-concept of inodes on top of the block layer. Inodes
+    correspond to our mental image of a ’file’ that is stored on the disk. They have an
+    inode number to identify them, and point to a sequence of data blocks belonging
+    to the current inode. Inodes can grown and shrink as required, under the effect of
+    different system calls (e.g. read, write, seek, …).
+    */
+
+    /*
+    Inodes are stored in a section of the disk called the inode region. Since inodes are decently
+    small compared to disk blocks, we do not create a separate bitmap region to keep
+    track of which inodes are (un)allocated. Rather, we can find out whether an inode
+    is in use by reading it from the disk and checking whether its type is ’free’. Call
+    ninodes the total number of inodes in the file system. Part of a disk block is then
+    provided on the disk for each inode, from inode 0 to inode ninodes − 1.  Multiple
+    inodes are usually stored on a single block, leaving some empty space at the end if
+    the inode size does not divide the block size
+    */
+
+    fn sb_valid(sb: &SuperBlock) -> bool {
+        // The regions have to appear in the right order
+        // ik denk checken of start enzo juist is
+        
+        // van Toledo forum: datastart + ndatablocks =< nblocks
+        if !(sb.datastart + sb.ndatablocks <= sb.nblocks) {
+            return false
+        }
+        else {
+            return true
+        }
+
+        // The regions have to be sufficiently large to hold ninodes inodes (calculated using the size of your inodes) 
+        // and to hold and keep track of ndatablocks datablocks
+        let ninondes = sb.ninodes;
+        
+        // The regions have to physically fit on the disk together, i.e. fall within the first nblocks blocks
+        let nblocks = sb.nblocks;
+        return true
+    }
+
+    fn mkfs<P: AsRef<Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error>{
+        // Check if the given superblock is a valid file system superblock
+        
+        if !Self::sb_valid(sb) {
+            return Err(BlockSupportError::InvalidSuperBlock);
+
+        } else {
+            //Create a new Device at the given path, to allow the file system to communicate with it
+           return  Err(BlockSupportError::InvalidSuperBlock);
+        }
+
+    }
+
+    // Given an existing Device called dev, make sure that its image corresponds to 
+    // a valid file system by reading its superblock and checking the following conditions:
+    fn mountfs(dev: Device) -> Result<Self, Self::Error> {
+        // The superblock is a valid superblock
+        // The block size and number of blocks of the device and superblock agree
+
+        // Superblock lezen want is eerste op disk? 
+        let sb = dev.read_block( 0);
+        
+        if Self::sb_valid(sb){
+            return Err(BlockSupportError::InvalidSuperBlock)
+        }
+        // If these conditions are satisfied, wrap the given Device in a file system and return it.
+        return Err(BlockSupportError::InvalidSuperBlock)
+
+    }
+
+    fn unmountfs(self) -> Device {
+        // Unmount the give file system, thereby consuming it Returns the image of the file system, 
+        // i.e. the Device backing it. The implementation of this method should be almost trivial
+        return self.device
+    }
+
+    type Error = BlockSupportError;
+    
+}
+
 
 // Here we define a submodule, called `my_tests`, that will contain your unit
 // tests for this module.
