@@ -156,7 +156,7 @@ impl FileSysSupport for CustomFileSystem {
 
         // Superblock lezen want is eerste op disk? 
         let sb = dev.read_block( 0);
-        
+
         if Self::sb_valid(sb){
             return Err(BlockSupportError::InvalidSuperBlock)
         }
@@ -173,6 +173,36 @@ impl FileSysSupport for CustomFileSystem {
 
     type Error = BlockSupportError;
     
+}
+
+impl BlockSupport for CustomFileSystem {
+    fn b_get(&self, i: u64) -> Result<Block, Self::Error> {
+        todo!()
+    }
+
+    fn b_put(&mut self, b: &Block) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn b_alloc(&mut self) -> Result<u64, Self::Error> {
+        todo!()
+    }
+
+    fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
+        todo!()
+    }
+
+    fn sup_put(&mut self, sup: &SuperBlock) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 
