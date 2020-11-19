@@ -31,7 +31,7 @@ use std::fmt;
 use std::path::Path;
 
 // If you want to import things from the API crate, do so as follows:
-use cplfs_api::{controller::Device, fs::FileSysSupport};
+use cplfs_api::{types::DINODE_SIZE, controller::Device, fs::FileSysSupport};
 // import SuperBlock
 use cplfs_api::types::SuperBlock;
 // import BlockSupport
@@ -68,77 +68,55 @@ pub enum BlockSupportError {
 
 impl FileSysSupport for CustomFileSystem {
 
-    /*
-    Data blocks are a specific type of blocks that make up the contents of files. They
-    are stored on the disk, in a region called the data block region.
-    Call nbdatablocks the total number of data blocks in the file system. An entire
-    disk block is then provided on the disk for each data block, from block 0 to block
-    nbdatablocks − 1.
-    */
-
-    /*
-    To keep track of which blocks in the data block region have been allocated and
-    which ones are still free, the disk contains a second region called the bitmap region,
-    which contains a single bit for each data block, again from 0 to nbdatablocks − 1.
-    If the bit corresponding to a certain data block is set to 1, then this block is currently
-    in use. If the bit is set to 0, then the block is free and can be allocated for various
-    purposes 
-    */
-
-    /*
-    Second, we use a so-called superblock to keep track of all the metadata of the file
-    system. The block layer has provisions to read and write this superblock. 
-    That being said, the superblock is sufficiently important and frequently accessed to warrant keeping 
-    a read-out version cached in the kernel (in our case, as we will not
-    model an entire operating system; caching happens in the block layer). 
-    The superblock is stored in the very first block of our device image, so that the file system
-    knows where to find it at boot time.
-    */
-
-    /*
-    Inodes Builds the well-known Unix-concept of inodes on top of the block layer. Inodes
-    correspond to our mental image of a ’file’ that is stored on the disk. They have an
-    inode number to identify them, and point to a sequence of data blocks belonging
-    to the current inode. Inodes can grown and shrink as required, under the effect of
-    different system calls (e.g. read, write, seek, …).
-    */
-
-    /*
-    Inodes are stored in a section of the disk called the inode region. Since inodes are decently
-    small compared to disk blocks, we do not create a separate bitmap region to keep
-    track of which inodes are (un)allocated. Rather, we can find out whether an inode
-    is in use by reading it from the disk and checking whether its type is ’free’. Call
-    ninodes the total number of inodes in the file system. Part of a disk block is then
-    provided on the disk for each inode, from inode 0 to inode ninodes − 1.  Multiple
-    inodes are usually stored on a single block, leaving some empty space at the end if
-    the inode size does not divide the block size
-    */
-
     fn sb_valid(sb: &SuperBlock) -> bool {
-        // The regions have to appear in the right order
-        // ik denk checken of start enzo juist is
+        // the bitmap starts after the inodes
+        let order_cond1 = sb.inodestart < sb.bmapstart;
+        // at least one block for the bit map
+        let order_cond2 = sb.bmapstart < sb.datastart;
+        // We need one block for the Superblock
+        let order_cond3 =  sb.inodestart > 0;
         
-        // van Toledo forum: datastart + ndatablocks =< nblocks
-        if !(sb.datastart + sb.ndatablocks <= sb.nblocks) {
-            return false
-        }
-        else {
-            return true
-        }
-
         // The regions have to be sufficiently large to hold ninodes inodes (calculated using the size of your inodes) 
         // and to hold and keep track of ndatablocks datablocks
-        let ninondes = sb.ninodes;
+        // In SuperBlock staat: "The inode region is assumed to be sufficiently long to contain niondes inodes"
+
+        // DInode size
+        /*
+        The number of inodes stored in each block is equal to the floor of the block size divided by the inode size, 
+        i.e. blocks are packed with inodes, 
+        and individual inodes are always entirely stored in a single block (they are never broken up over multiple blocks).
+        */
+        let inode_size = DINODE_SIZE;
+        let inode_blocks = sb.bmapstart - sb.inodestart;
+        let inode_cond = sb.block_size / inode_size;
+        
+
+
+        // The amount of bites the bitmap can store
+        let bitmapbites = (sb.datastart - sb.bmapstart) * sb.block_size * 8;
+        // The bitmap needs to provide place for at least 1 bit for every datablock
+        let hold_cond1 = bitmapbites >= sb.ndatablocks;
+        // There needs to be enough space for the datablocks
+        let hold_cond2 = sb.datastart + sb.ndatablocks <= sb.nblocks;
         
         // The regions have to physically fit on the disk together, i.e. fall within the first nblocks blocks
-        let nblocks = sb.nblocks;
-        return true
+        // SuperBlock (= always 1 block) + Innodes + BitMap + DataBlocks <= Nblocks
+        let fit_cond1 = 1 + sb.ninodes + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
+
+    
+        if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && fit_cond1 {
+            return true
+        }
+        else {
+            return false
+        }
+       
     }
 
     fn mkfs<P: AsRef<Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error>{
         // Check if the given superblock is a valid file system superblock
-        
-        if !Self::sb_valid(sb) {
+        let sb_cond = Self::sb_valid(sb);
+        if !sb_cond {
             return Err(BlockSupportError::InvalidSuperBlock);
 
         } else {
@@ -156,8 +134,9 @@ impl FileSysSupport for CustomFileSystem {
 
         // Superblock lezen want is eerste op disk? 
         let sb = dev.read_block( 0);
+        let sb_cond =  Self::sb_valid(sb);
 
-        if Self::sb_valid(sb){
+        if sb_cond{
             return Err(BlockSupportError::InvalidSuperBlock)
         }
         // If these conditions are satisfied, wrap the given Device in a file system and return it.
