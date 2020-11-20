@@ -86,11 +86,9 @@ impl FileSysSupport for CustomFileSystem {
         i.e. blocks are packed with inodes, 
         and individual inodes are always entirely stored in a single block (they are never broken up over multiple blocks).
         */
-        let inode_size = DINODE_SIZE;
         let inode_blocks = sb.bmapstart - sb.inodestart;
-        let inode_cond = sb.block_size / inode_size;
-        
-
+        // the amount of bites the inodes take 
+        let inode_cond =  *DINODE_SIZE * sb.ninodes <= inode_blocks * sb.block_size;
 
         // The amount of bites the bitmap can store
         let bitmapbites = (sb.datastart - sb.bmapstart) * sb.block_size * 8;
@@ -104,7 +102,7 @@ impl FileSysSupport for CustomFileSystem {
         let fit_cond1 = 1 + sb.ninodes + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
 
     
-        if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && fit_cond1 {
+        if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && fit_cond1 && inode_cond{
             return true
         }
         else {
