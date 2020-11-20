@@ -31,7 +31,7 @@ use std::fmt;
 use std::path::Path;
 
 // If you want to import things from the API crate, do so as follows:
-use cplfs_api::{types::DINODE_SIZE, controller::Device, fs::FileSysSupport};
+use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::Buffer, types::{DINODE_SIZE, SUPERBLOCK_SIZE}};
 // import SuperBlock
 use cplfs_api::types::SuperBlock;
 // import BlockSupport
@@ -48,22 +48,28 @@ use thiserror::Error;
 /// **TODO**: replace the below type by the type of your file system
 pub type FSName = CustomFileSystem;
 
-// testing in making a custom type
+// Custom type
 struct CustomFileSystem {
     device: Device 
 }
 
+
 impl CustomFileSystem {
-    
+    pub fn new(dev: Device) -> CustomFileSystem {
+        CustomFileSystem { device: dev }
+    }  
 }
 
 #[derive(Error, Debug)]
-/// Custom error type for
-pub enum BlockSupportError {
+/// Custom type for errors in my implementation
+pub enum CustomFileSystemError {
     #[error("invalid SuperBlock was passed")]
-    /// Error when an invalid superblock is passed 
-    /// to a function that needs it
+    /// Error thrown when an invalid superblock is encountered
     InvalidSuperBlock,
+    /// The input provided to some method in the controller layer was invalid
+    #[error("API error")]
+    GivenError(#[from] error_given::APIError)
+
 }
 
 impl FileSysSupport for CustomFileSystem {
@@ -73,35 +79,18 @@ impl FileSysSupport for CustomFileSystem {
         let order_cond1 = sb.inodestart < sb.bmapstart;
         // at least one block for the bit map
         let order_cond2 = sb.bmapstart < sb.datastart;
-        // We need one block for the Superblock
-        let order_cond3 =  sb.inodestart > 0;
-        
-        // The regions have to be sufficiently large to hold ninodes inodes (calculated using the size of your inodes) 
-        // and to hold and keep track of ndatablocks datablocks
-        // In SuperBlock staat: "The inode region is assumed to be sufficiently long to contain niondes inodes"
-
-        // DInode size
-        /*
-        The number of inodes stored in each block is equal to the floor of the block size divided by the inode size, 
-        i.e. blocks are packed with inodes, 
-        and individual inodes are always entirely stored in a single block (they are never broken up over multiple blocks).
-        */
-        let inode_blocks = sb.bmapstart - sb.inodestart;
-        // the amount of bites the inodes take 
-        let inode_cond =  *DINODE_SIZE * sb.ninodes <= inode_blocks * sb.block_size;
-
-        // The amount of bites the bitmap can store
-        let bitmapbites = (sb.datastart - sb.bmapstart) * sb.block_size * 8;
+        // One block for the Superblock
+        let order_cond3 =  sb.inodestart > 0;  
+        // The inode region has to be sufficiently large to hold ninodes inodes 
+        let inode_cond =  *DINODE_SIZE * sb.ninodes <= (sb.bmapstart - sb.inodestart) * sb.block_size;
         // The bitmap needs to provide place for at least 1 bit for every datablock
-        let hold_cond1 = bitmapbites >= sb.ndatablocks;
+        let hold_cond1 = (sb.datastart - sb.bmapstart) * sb.block_size * 8 >= sb.ndatablocks;
         // There needs to be enough space for the datablocks
         let hold_cond2 = sb.datastart + sb.ndatablocks <= sb.nblocks;
-        
         // The regions have to physically fit on the disk together, i.e. fall within the first nblocks blocks
         // SuperBlock (= always 1 block) + Innodes + BitMap + DataBlocks <= Nblocks
         let fit_cond1 = 1 + sb.ninodes + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
-
-    
+        // Return value
         if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && fit_cond1 && inode_cond{
             return true
         }
@@ -115,30 +104,32 @@ impl FileSysSupport for CustomFileSystem {
         // Check if the given superblock is a valid file system superblock
         let sb_cond = Self::sb_valid(sb);
         if !sb_cond {
-            return Err(BlockSupportError::InvalidSuperBlock);
-
-        } else {
-            //Create a new Device at the given path, to allow the file system to communicate with it
-           return  Err(BlockSupportError::InvalidSuperBlock);
+            return Err(CustomFileSystemError::InvalidSuperBlock);
+        } else  {
+           //Create a new Device at the given path, to allow the file system to communicate with it
+           let mut device = Device::new(path, sb.block_size,sb.nblocks)?;
+           // A super block containing the file system metadata at block index 0
+           let mut block = Block::new_zero(0, *SUPERBLOCK_SIZE);
+           Block::serialize_into(&mut block, sb, 0)?;
+           // write this block to the device?
+           device.write_block(&block)?;
+           return Ok(CustomFileSystem::new(device));
         }
-
+        
     }
 
     // Given an existing Device called dev, make sure that its image corresponds to 
     // a valid file system by reading its superblock and checking the following conditions:
     fn mountfs(dev: Device) -> Result<Self, Self::Error> {
         // The superblock is a valid superblock
-        // The block size and number of blocks of the device and superblock agree
-
+       
         // Superblock lezen want is eerste op disk? 
-        let sb = dev.read_block( 0);
-        let sb_cond =  Self::sb_valid(sb);
-
-        if sb_cond{
-            return Err(BlockSupportError::InvalidSuperBlock)
-        }
-        // If these conditions are satisfied, wrap the given Device in a file system and return it.
-        return Err(BlockSupportError::InvalidSuperBlock)
+        // let sb = dev.read_block( 0)?;
+    
+        //let sb_cond =  Self::sb_valid(&SuperBlock::from(sb));
+        return Ok(CustomFileSystem::new(dev))
+         // The block size and number of blocks of the device and superblock agree
+        
 
     }
 
@@ -148,17 +139,24 @@ impl FileSysSupport for CustomFileSystem {
         return self.device
     }
 
-    type Error = BlockSupportError;
+    type Error = CustomFileSystemError;
     
 }
 
+
+
 impl BlockSupport for CustomFileSystem {
+
+    //Read the nth block of the entire disk and return it
     fn b_get(&self, i: u64) -> Result<Block, Self::Error> {
-        todo!()
+        let block = self.device.read_block(i)?;
+        return Ok(block)
     }
 
+    //Write the nth block of the entire disk and return it
     fn b_put(&mut self, b: &Block) -> Result<(), Self::Error> {
-        todo!()
+        let block = self.device.write_block(b)?;
+        return Ok(block)
     }
 
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
