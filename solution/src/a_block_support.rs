@@ -30,6 +30,7 @@ use std::{error, io};
 use std::fmt;
 use std::path::Path;
 
+
 // If you want to import things from the API crate, do so as follows:
 use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::Buffer, types::{DINODE_SIZE, SUPERBLOCK_SIZE}};
 // import SuperBlock
@@ -49,12 +50,15 @@ use thiserror::Error;
 pub type FSName = CustomFileSystem;
 
 // Custom type
-struct CustomFileSystem {
+/// Custom file system data type
+pub struct CustomFileSystem {
     device: Device 
 }
 
 
 impl CustomFileSystem {
+
+    /// Create a new CustomFileSystem given a Device dev
     pub fn new(dev: Device) -> CustomFileSystem {
         CustomFileSystem { device: dev }
     }  
@@ -63,12 +67,16 @@ impl CustomFileSystem {
 #[derive(Error, Debug)]
 /// Custom type for errors in my implementation
 pub enum CustomFileSystemError {
-    #[error("invalid SuperBlock was passed")]
+    #[error("invalid SuperBlock was detected")]
     /// Error thrown when an invalid superblock is encountered
     InvalidSuperBlock,
+    #[error("SuperBlock and device are not compatible")]
+    /// Thrown when the device and superblock don't agree
+    IncompatibleDeviceSuperBlock,
     /// The input provided to some method in the controller layer was invalid
     #[error("API error")]
     GivenError(#[from] error_given::APIError)
+
 
 }
 
@@ -90,7 +98,7 @@ impl FileSysSupport for CustomFileSystem {
         // The regions have to physically fit on the disk together, i.e. fall within the first nblocks blocks
         // SuperBlock (= always 1 block) + Innodes + BitMap + DataBlocks <= Nblocks
         let fit_cond1 = 1 + sb.ninodes + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
-        // Return value
+        // 
         if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && fit_cond1 && inode_cond{
             return true
         }
@@ -106,44 +114,47 @@ impl FileSysSupport for CustomFileSystem {
         if !sb_cond {
             return Err(CustomFileSystemError::InvalidSuperBlock);
         } else  {
+           // I think we only have to write the sb, since everything is init to 0
            //Create a new Device at the given path, to allow the file system to communicate with it
-           let mut device = Device::new(path, sb.block_size,sb.nblocks)?;
+           let mut device = Device::new(path, sb.block_size, sb.nblocks)?;
            // A super block containing the file system metadata at block index 0
-           let mut block = Block::new_zero(0, *SUPERBLOCK_SIZE);
-           Block::serialize_into(&mut block, sb, 0)?;
-           // write this block to the device?
+           let mut block = device.read_block(0)?;
+           block.serialize_into( sb, 0)?;
+           //Block::serialize_into(&mut block, sb, 0)?;
+           // write this block to the device
            device.write_block(&block)?;
            return Ok(CustomFileSystem::new(device));
-        }
-        
+        }     
     }
 
     // Given an existing Device called dev, make sure that its image corresponds to 
-    // a valid file system by reading its superblock and checking the following conditions:
+    // a valid file system 
     fn mountfs(dev: Device) -> Result<Self, Self::Error> {
-        // The superblock is a valid superblock
-       
-        // Superblock lezen want is eerste op disk? 
-        // let sb = dev.read_block( 0)?;
-    
-        //let sb_cond =  Self::sb_valid(&SuperBlock::from(sb));
-        return Ok(CustomFileSystem::new(dev))
-         // The block size and number of blocks of the device and superblock agree
-        
-
+        // The superblock is a valid superblock 
+        let sb_block = dev.read_block( 0)?;
+        let superblock = sb_block.deserialize_from::<SuperBlock>(0)?;
+        if Self::sb_valid(&superblock) {
+            // The block size and number of blocks of the device and superblock agree
+            if dev.block_size == superblock.block_size && dev.nblocks == superblock.nblocks {
+                return Ok(CustomFileSystem::new(dev))
+            }
+            else {
+                return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock);
+            }            
+        }
+        else {
+            return Err(CustomFileSystemError::InvalidSuperBlock);
+        }
     }
 
+    // Unmount the give file system, thereby consuming it Returns the image of the file system, i.e. the Device backing it
     fn unmountfs(self) -> Device {
-        // Unmount the give file system, thereby consuming it Returns the image of the file system, 
-        // i.e. the Device backing it. The implementation of this method should be almost trivial
         return self.device
     }
 
     type Error = CustomFileSystemError;
     
 }
-
-
 
 impl BlockSupport for CustomFileSystem {
 
@@ -159,8 +170,25 @@ impl BlockSupport for CustomFileSystem {
         return Ok(block)
     }
 
+    // Free the ith block in the block data region, by setting the ith bit in the free bit map region to zero.
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
-        todo!()
+        let sb = self.b_get(0)?;
+        let superblock = sb.deserialize_from::<SuperBlock>(0)?;
+        let bitmap_block = self.b_get(superblock.bmapstart)?;
+        let mut byte: [u8; 1] = [0];
+        let offset = (i / 8).ceil();
+        let bitmap_vector = bitmap_block.read_data(byte, i / 8);
+
+        if bitmap_vector.is_ok() {
+            let bit = byte[i % 8];
+            return Ok(());
+
+        }
+        else {
+            // **TODO** fix nieuwe error
+            return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock)
+        }
+        
     }
 
     fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
@@ -207,7 +235,7 @@ mod my_tests {
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
 
-    #[path = "utils.rs"]
+    #[path = "/utils.rs"]
     mod utils;
 
     #[test]
