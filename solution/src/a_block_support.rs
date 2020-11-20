@@ -167,22 +167,37 @@ impl BlockSupport for CustomFileSystem {
     //Write the nth block of the entire disk and return it
     fn b_put(&mut self, b: &Block) -> Result<(), Self::Error> {
         let block = self.device.write_block(b)?;
-        return Ok(block)
+        return Ok(block);
     }
 
     // Free the ith block in the block data region, by setting the ith bit in the free bit map region to zero.
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
-        let sb = self.b_get(0)?;
-        let superblock = sb.deserialize_from::<SuperBlock>(0)?;
+        let superblock = self.sup_get()?;
+        // Index i is out of bounds, it is higher than the number of data blocks
+        if i > superblock.ndatablocks - 1 {
+            // **TODO** fix custom error
+            return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock);
+        }
+
+        // bitmap kan meerdere blokken hebben, checken welke we nodig hebben
+        // adhv block size?
+        let nbitmapb = superblock.inodestart - superblock.bmapstart;
         let bitmap_block = self.b_get(superblock.bmapstart)?;
         let mut byte: [u8; 1] = [0];
-        let offset = (i / 8).ceil();
-        let bitmap_vector = bitmap_block.read_data(byte, i / 8);
+        // the byte we want to read from the bitmap block?
+        let offset = (i / 8) as f64;
+        let bitmap_vector = bitmap_block.read_data(&mut byte, offset.ceil() as u64);
 
         if bitmap_vector.is_ok() {
-            let bit = byte[i % 8];
-            return Ok(());
-
+            let bit = &byte[(i % 8) as usize];
+            // If the ith block is already a free block
+            if *bit == 0 {
+                // **TODO** fix nieuwe error
+                return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock)
+            }
+            else {
+                return Ok(());
+            }
         }
         else {
             // **TODO** fix nieuwe error
@@ -192,19 +207,33 @@ impl BlockSupport for CustomFileSystem {
     }
 
     fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
-        todo!()
+        let sb = self.sup_get()?;
+        // Index i is out of bounds, if it is higher than the number of data blocks
+        if i > sb.ndatablocks - 1 {
+            // **TODO** out of bounds error here
+            return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock)
+        }
+        self.b_put(&Block::new_zero(sb.datastart + i, sb.block_size))
+        
     }
 
+    // Errors appropriately if no blocks are available.
     fn b_alloc(&mut self) -> Result<u64, Self::Error> {
+
         todo!()
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
-        todo!()
+        let sb = self.b_get(0)?;
+        let superblock = sb.deserialize_from::<SuperBlock>(0)?;
+        return Ok(superblock);
     }
 
     fn sup_put(&mut self, sup: &SuperBlock) -> Result<(), Self::Error> {
-        todo!()
+        let mut block = self.b_get(0)?;
+        block.serialize_into( sup, 0)?;
+        self.b_put(&block)?;
+        return Ok(())
     }
 }
 
