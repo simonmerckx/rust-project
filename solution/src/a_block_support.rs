@@ -73,11 +73,12 @@ pub enum CustomFileSystemError {
     #[error("SuperBlock and device are not compatible")]
     /// Thrown when the device and superblock don't agree
     IncompatibleDeviceSuperBlock,
+    #[error("The data index is out of bounds for this device")]
+    /// Thrown when the block index provided is larger than ndatablocks - 1
+    DataIndexOutOfBounds,
     /// The input provided to some method in the controller layer was invalid
     #[error("API error")]
     GivenError(#[from] error_given::APIError)
-
-
 }
 
 impl FileSysSupport for CustomFileSystem {
@@ -176,7 +177,7 @@ impl BlockSupport for CustomFileSystem {
         // Index i is out of bounds, it is higher than the number of data blocks
         if i > superblock.ndatablocks - 1 {
             // **TODO** fix custom error
-            return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock);
+            return Err(CustomFileSystemError::DataIndexOutOfBounds);
         }
 
         // bitmap kan meerdere blokken hebben, checken welke we nodig hebben
@@ -211,7 +212,7 @@ impl BlockSupport for CustomFileSystem {
         // Index i is out of bounds, if it is higher than the number of data blocks
         if i > sb.ndatablocks - 1 {
             // **TODO** out of bounds error here
-            return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock)
+            return Err(CustomFileSystemError::DataIndexOutOfBounds)
         }
         self.b_put(&Block::new_zero(sb.datastart + i, sb.block_size))
         
