@@ -200,6 +200,7 @@ impl BlockSupport for CustomFileSystem {
         }
         else{
             let res = bitmap_block.write_data(&[and], byte_offset )?;
+            self.b_put(&bitmap_block)?;
             return Ok(res)
         }    
     }
@@ -219,13 +220,14 @@ impl BlockSupport for CustomFileSystem {
     fn b_alloc(&mut self) -> Result<u64, Self::Error> {
         let superblock = self.sup_get()?;
         let nbbitmapblocks = superblock.datastart - superblock.bmapstart;
+        /*
         let mut bitmapblocks = Vec::<Block>::new();
         //Make sure to load each bitmap block only once in your implementation
         for x in 0..nbbitmapblocks {
             bitmapblocks.push(self.b_get(superblock.bmapstart + x)?);
         }
+        */
 
-        let mut index = superblock.ndatablocks + 1;
         for x in 0..nbbitmapblocks {
             let mut bitmap_block = self.b_get(superblock.bmapstart + x)?;
             for y in 0..superblock.block_size {
@@ -235,21 +237,23 @@ impl BlockSupport for CustomFileSystem {
                     let set_byte = 0b0000_0001 << z;
                     let and = byte[0] & set_byte;
                     // This spot is free so we can use it
-                    if !and == set_byte {
-                        index = (x*superblock.block_size*8) + (y*8) + z; 
-                        bitmap_block.write_data(&[and], y)?
+                    if !(and == set_byte) {
+                        let index = (x*superblock.block_size*8) + (y*8) + z; 
+                        let new_byte = byte[0] | set_byte;
+                        bitmap_block.write_data(&[new_byte], y)?;
+                        self.b_put(&bitmap_block)?;
+                        self.b_zero(index)?;
+                        return Ok(index)
                     }
                 }    
             }
         }
 
         // nothing changed
-        if index == superblock.ndatablocks + 1{
-            return Err(CustomFileSystemError::NoFreeDataBlock);
-        }
+        return Err(CustomFileSystemError::NoFreeDataBlock);
+        
 
-        self.b_zero(index)?;
-        return Ok(index)
+        
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
@@ -293,8 +297,8 @@ mod my_tests {
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
 
-    #[path = "../../api/fs-tests/utils.rs"]
-    mod utils;
+    //#[path = "/utils.rs"]
+    //mod utils;
 
     #[test]
     fn unit_test() {
