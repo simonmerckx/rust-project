@@ -76,6 +76,12 @@ pub enum CustomFileSystemError {
     #[error("The data index is out of bounds for this device")]
     /// Thrown when the block index provided is larger than ndatablocks - 1
     DataIndexOutOfBounds,
+    #[error("The block that was tried to be freed is already free")]
+    /// Thrown when the block that is trying to be freed is already free
+    BlockIsAlreadyFree,
+    #[error("There is no free data block")]
+    /// Thrown when there is no free data block 
+    NoFreeDataBlock,
     /// The input provided to some method in the controller layer was invalid
     #[error("API error")]
     GivenError(#[from] error_given::APIError)
@@ -97,10 +103,9 @@ impl FileSysSupport for CustomFileSystem {
         // There needs to be enough space for the datablocks
         let hold_cond2 = sb.datastart + sb.ndatablocks <= sb.nblocks;
         // The regions have to physically fit on the disk together, i.e. fall within the first nblocks blocks
-        // SuperBlock (= always 1 block) + Innodes + BitMap + DataBlocks <= Nblocks
-        let fit_cond1 = 1 + sb.ninodes + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
-        // 
-        if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && fit_cond1 && inode_cond{
+        // SuperBlock (= always 1 block) + Innode blocks + BitMap + DataBlocks <= Nblocks
+        let fit_cond1 = 1 + (sb.bmapstart - sb.inodestart) + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
+        if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && inode_cond && fit_cond1 {
             return true
         }
         else {
@@ -120,7 +125,7 @@ impl FileSysSupport for CustomFileSystem {
            let mut device = Device::new(path, sb.block_size, sb.nblocks)?;
            // A super block containing the file system metadata at block index 0
            let mut block = device.read_block(0)?;
-           block.serialize_into( sb, 0)?;
+           block.serialize_into(sb, 0)?;
            //Block::serialize_into(&mut block, sb, 0)?;
            // write this block to the device
            device.write_block(&block)?;
@@ -147,18 +152,14 @@ impl FileSysSupport for CustomFileSystem {
             return Err(CustomFileSystemError::InvalidSuperBlock);
         }
     }
-
     // Unmount the give file system, thereby consuming it Returns the image of the file system, i.e. the Device backing it
     fn unmountfs(self) -> Device {
         return self.device
     }
-
     type Error = CustomFileSystemError;
-    
 }
 
 impl BlockSupport for CustomFileSystem {
-
     //Read the nth block of the entire disk and return it
     fn b_get(&self, i: u64) -> Result<Block, Self::Error> {
         let block = self.device.read_block(i)?;
@@ -176,52 +177,79 @@ impl BlockSupport for CustomFileSystem {
         let superblock = self.sup_get()?;
         // Index i is out of bounds, it is higher than the number of data blocks
         if i > superblock.ndatablocks - 1 {
-            // **TODO** fix custom error
             return Err(CustomFileSystemError::DataIndexOutOfBounds);
         }
-
-        // bitmap kan meerdere blokken hebben, checken welke we nodig hebben
-        // adhv block size?
-        let nbitmapb = superblock.inodestart - superblock.bmapstart;
-        let bitmap_block = self.b_get(superblock.bmapstart)?;
+        // bitmap can be mutiple blocks large, we have to select the right one
+        let bitmapblockcapacity = superblock.block_size * 8;
+        let block_offset = i / bitmapblockcapacity;
+        let mut bitmap_block = self.b_get(superblock.bmapstart + block_offset)?;
+        // one byte of data
         let mut byte: [u8; 1] = [0];
-        // the byte we want to read from the bitmap block?
-        let offset = (i / 8) as f64;
-        let bitmap_vector = bitmap_block.read_data(&mut byte, offset.ceil() as u64);
-
-        if bitmap_vector.is_ok() {
-            let bit = &byte[(i % 8) as usize];
-            // If the ith block is already a free block
-            if *bit == 0 {
-                // **TODO** fix nieuwe error
-                return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock)
-            }
-            else {
-                return Ok(());
-            }
+        // the byte we want to read from the bitmap block
+        let byte_offset =  (i % bitmapblockcapacity) / 8;
+        let bit_offset =  (i % bitmapblockcapacity) % 8;
+        bitmap_block.read_data(&mut byte, byte_offset)?;
+        // because << adds zeros we should do this and invert later
+        let set_byte = 0b0000_0001 << bit_offset;
+        // we define the order of the bits within each byte you read from right to left
+        let and = byte[0] & !set_byte;
+        let or = byte[0] | !set_byte;
+        if or == set_byte {
+            // ith block is already a free block
+            return Err(CustomFileSystemError::BlockIsAlreadyFree);
         }
-        else {
-            // **TODO** fix nieuwe error
-            return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock)
-        }
-        
+        else{
+            let res = bitmap_block.write_data(&[and], byte_offset )?;
+            return Ok(res)
+        }    
     }
 
     fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
-        let sb = self.sup_get()?;
+        let superblock = self.sup_get()?;
         // Index i is out of bounds, if it is higher than the number of data blocks
-        if i > sb.ndatablocks - 1 {
+        if i > superblock.ndatablocks - 1 {
             // **TODO** out of bounds error here
             return Err(CustomFileSystemError::DataIndexOutOfBounds)
         }
-        self.b_put(&Block::new_zero(sb.datastart + i, sb.block_size))
+        self.b_put(&Block::new_zero(superblock.datastart + i, superblock.block_size))
         
     }
 
     // Errors appropriately if no blocks are available.
     fn b_alloc(&mut self) -> Result<u64, Self::Error> {
+        let superblock = self.sup_get()?;
+        let nbbitmapblocks = superblock.datastart - superblock.bmapstart;
+        let mut bitmapblocks = Vec::<Block>::new();
+        //Make sure to load each bitmap block only once in your implementation
+        for x in 0..nbbitmapblocks {
+            bitmapblocks.push(self.b_get(superblock.bmapstart + x)?);
+        }
 
-        todo!()
+        let mut index = superblock.ndatablocks + 1;
+        for x in 0..nbbitmapblocks {
+            let mut bitmap_block = self.b_get(superblock.bmapstart + x)?;
+            for y in 0..superblock.block_size {
+                let mut byte: [u8; 1] = [0];
+                bitmap_block.read_data(&mut byte, y)?;
+                for z in 0..8 {
+                    let set_byte = 0b0000_0001 << z;
+                    let and = byte[0] & set_byte;
+                    // This spot is free so we can use it
+                    if !and == set_byte {
+                        index = (x*superblock.block_size*8) + (y*8) + z; 
+                        bitmap_block.write_data(&[and], y)?
+                    }
+                }    
+            }
+        }
+
+        // nothing changed
+        if index == superblock.ndatablocks + 1{
+            return Err(CustomFileSystemError::NoFreeDataBlock);
+        }
+
+        self.b_zero(index)?;
+        return Ok(index)
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
@@ -265,7 +293,7 @@ mod my_tests {
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
 
-    #[path = "/utils.rs"]
+    #[path = "../../api/fs-tests/utils.rs"]
     mod utils;
 
     #[test]
