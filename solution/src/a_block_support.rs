@@ -14,7 +14,7 @@
 //! or you want to explain your approach, write it down after the comments
 //! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
-//! COMPLETED: NO
+//! COMPLETED: YES
 //!
 //! COMMENTS:
 //!
@@ -47,20 +47,20 @@ use thiserror::Error;
 /// your file system data type so we can just use `FSName` instead of
 /// having to manually figure out your file system name.
 /// **TODO**: replace the below type by the type of your file system
-pub type FSName = CustomFileSystem;
+pub type FSName = BlockCustomFileSystem;
 
 // Custom type
 /// Custom file system data type
-pub struct CustomFileSystem {
+pub struct BlockCustomFileSystem {
     device: Device 
 }
 
 
-impl CustomFileSystem {
+impl BlockCustomFileSystem {
 
     /// Create a new CustomFileSystem given a Device dev
-    pub fn new(dev: Device) -> CustomFileSystem {
-        CustomFileSystem { device: dev }
+    pub fn new(dev: Device) -> BlockCustomFileSystem {
+        BlockCustomFileSystem { device: dev }
     }  
 }
 
@@ -87,7 +87,7 @@ pub enum CustomFileSystemError {
     GivenError(#[from] error_given::APIError)
 }
 
-impl FileSysSupport for CustomFileSystem {
+impl FileSysSupport for BlockCustomFileSystem {
 
     fn sb_valid(sb: &SuperBlock) -> bool {
         // the bitmap starts after the inodes
@@ -110,8 +110,7 @@ impl FileSysSupport for CustomFileSystem {
         }
         else {
             return false
-        }
-       
+        }  
     }
 
     fn mkfs<P: AsRef<Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error>{
@@ -129,7 +128,7 @@ impl FileSysSupport for CustomFileSystem {
            //Block::serialize_into(&mut block, sb, 0)?;
            // write this block to the device
            device.write_block(&block)?;
-           return Ok(CustomFileSystem::new(device));
+           return Ok(BlockCustomFileSystem::new(device));
         }     
     }
 
@@ -142,7 +141,7 @@ impl FileSysSupport for CustomFileSystem {
         if Self::sb_valid(&superblock) {
             // The block size and number of blocks of the device and superblock agree
             if dev.block_size == superblock.block_size && dev.nblocks == superblock.nblocks {
-                return Ok(CustomFileSystem::new(dev))
+                return Ok(BlockCustomFileSystem::new(dev))
             }
             else {
                 return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock);
@@ -159,7 +158,7 @@ impl FileSysSupport for CustomFileSystem {
     type Error = CustomFileSystemError;
 }
 
-impl BlockSupport for CustomFileSystem {
+impl BlockSupport for BlockCustomFileSystem {
     //Read the nth block of the entire disk and return it
     fn b_get(&self, i: u64) -> Result<Block, Self::Error> {
         let block = self.device.read_block(i)?;
