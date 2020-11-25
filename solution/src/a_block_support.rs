@@ -187,18 +187,18 @@ impl BlockSupport for CustomFileSystem {
         let mut byte: [u8; 1] = [0];
         // the byte we want to read from the bitmap block
         let byte_offset =  (i % bitmapblockcapacity) / 8;
-        let bit_offset =  (i % bitmapblockcapacity) % 8;
         bitmap_block.read_data(&mut byte, byte_offset)?;
         // because << adds zeros we should do this and invert later
+        let bit_offset =  (i % bitmapblockcapacity) % 8;
         let set_byte = 0b0000_0001 << bit_offset;
         // we define the order of the bits within each byte you read from right to left
-        let and = byte[0] & !set_byte;
         let or = byte[0] | !set_byte;
-        if or == set_byte {
+        if or == !set_byte {
             // ith block is already a free block
             return Err(CustomFileSystemError::BlockIsAlreadyFree);
         }
         else{
+            let and = byte[0] & !set_byte;
             let res = bitmap_block.write_data(&[and], byte_offset )?;
             self.b_put(&bitmap_block)?;
             return Ok(res)
@@ -216,18 +216,9 @@ impl BlockSupport for CustomFileSystem {
         
     }
 
-    // Errors appropriately if no blocks are available.
     fn b_alloc(&mut self) -> Result<u64, Self::Error> {
         let superblock = self.sup_get()?;
         let nbbitmapblocks = superblock.datastart - superblock.bmapstart;
-        /*
-        let mut bitmapblocks = Vec::<Block>::new();
-        //Make sure to load each bitmap block only once in your implementation
-        for x in 0..nbbitmapblocks {
-            bitmapblocks.push(self.b_get(superblock.bmapstart + x)?);
-        }
-        */
-
         for x in 0..nbbitmapblocks {
             let mut bitmap_block = self.b_get(superblock.bmapstart + x)?;
             for y in 0..superblock.block_size {
@@ -238,7 +229,13 @@ impl BlockSupport for CustomFileSystem {
                     let and = byte[0] & set_byte;
                     // This spot is free so we can use it
                     if !(and == set_byte) {
-                        let index = (x*superblock.block_size*8) + (y*8) + z; 
+                        let index = (x*superblock.block_size*8) + (y*8) + z;
+                        // The bitmap only consists of ndatablock bits,
+                        // if we go past this we are looking in a part of the last
+                        // bitmap block that is not allocated for the bitmap
+                        if index > superblock.ndatablocks - 1{
+                            return Err(CustomFileSystemError::NoFreeDataBlock);  
+                        } 
                         let new_byte = byte[0] | set_byte;
                         bitmap_block.write_data(&[new_byte], y)?;
                         self.b_put(&bitmap_block)?;
@@ -248,12 +245,8 @@ impl BlockSupport for CustomFileSystem {
                 }    
             }
         }
-
         // nothing changed
-        return Err(CustomFileSystemError::NoFreeDataBlock);
-        
-
-        
+        return Err(CustomFileSystemError::NoFreeDataBlock);     
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
@@ -297,8 +290,8 @@ mod my_tests {
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
 
-    //#[path = "/utils.rs"]
-    //mod utils;
+    #[path = "utils.rs"]
+    mod utils;
 
     #[test]
     fn unit_test() {
