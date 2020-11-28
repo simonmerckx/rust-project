@@ -22,68 +22,65 @@
 //! ...
 //!
 // import SuperBlock
-use cplfs_api::{fs::InodeSupport, types::SuperBlock};
+use cplfs_api::{fs::InodeSupport, types::{DInode, SuperBlock}};
 // import BlockSupport
 use cplfs_api::fs::BlockSupport;
 use cplfs_api::types::{Block, Inode};
 use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::Buffer, types::{DINODE_SIZE, SUPERBLOCK_SIZE}};
 use thiserror::Error;
 
-use crate::a_block_support::{self, BlockCustomFileSystem};
+use crate::a_block_support::{self, CustomBlockFileSystem};
 /// You are free to choose the name for your file system. As we will use
 /// automated tests when grading your assignment, indicate here the name of
 /// your file system data type so we can just use `FSName` instead of
 /// having to manually figure out the name.
 /// **TODO**: replace the below type by the type of your file system
-pub type FSName = InodeCustomFileSystem;
+pub type FSName = CustomInodeFileSystem;
 
 // Custom type
 /// Custom file system data type
-pub struct InodeCustomFileSystem {
-    device: Device,
-    block_system: BlockCustomFileSystem
+pub struct CustomInodeFileSystem {
+    //device: Device,
+    block_system: CustomBlockFileSystem
 }
 
-impl InodeCustomFileSystem {
+impl CustomInodeFileSystem {
 
-    /// Create a new CustomFileSystem given a Device dev
-    pub fn new(dev: Device, fs: BlockCustomFileSystem) -> InodeCustomFileSystem {
-        InodeCustomFileSystem { device: dev, block_system: fs }
+    /// Create a new InodeCustomFileSystem given a BlockCustomFileSystem
+    pub fn new(blockfs: CustomBlockFileSystem) -> CustomInodeFileSystem {
+        CustomInodeFileSystem {  block_system: blockfs }
     }  
 }
 
 #[derive(Error, Debug)]
 /// Custom type for errors in my implementation
-pub enum CustomFileSystemError {
-    #[error("invalid SuperBlock was detected")]
-    /// Error thrown when an invalid superblock is encountered
-    InvalidSuperBlock,
-    #[error("SuperBlock and device are not compatible")]
-    /// Thrown when the device and superblock don't agree
-    IncompatibleDeviceSuperBlock,
-    #[error("The data index is out of bounds for this device")]
-    /// Thrown when the block index provided is larger than ndatablocks - 1
-    DataIndexOutOfBounds,
-    #[error("The block that was tried to be freed is already free")]
-    /// Thrown when the block that is trying to be freed is already free
-    BlockIsAlreadyFree,
-    #[error("There is no free data block")]
-    /// Thrown when there is no free data block 
-    NoFreeDataBlock,
-    /// The input provided to some method in the controller layer was invalid
-    #[error("API error")]
-    GivenError(#[from] error_given::APIError)
+pub enum CustomInodeFileSystemError {
+    /// There was a problem in the block layer
+    #[error("BlockFileSystemError")]
+    GivenError(#[from] a_block_support::CustomBlockFileSystemError)
 }
 
-impl FileSysSupport for InodeCustomFileSystem {
-    type Error = CustomFileSystemError;
+impl FileSysSupport for CustomInodeFileSystem {
+    type Error = CustomInodeFileSystemError;
 
     fn sb_valid(sb: &SuperBlock) -> bool {
-        todo!()
+        return CustomBlockFileSystem::sb_valid(sb);
     }
 
     fn mkfs<P: AsRef<std::path::Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error> {
-        todo!()
+        let fs = CustomBlockFileSystem::mkfs(path, sb)?;
+        let inodestart = sb.inodestart;
+        for x in 0..sb.ninodes{
+            let inodes_block = sb.block_size / *DINODE_SIZE;
+            for y in 0..inodes_block {
+                let inode = DInode::default();
+                fs.device.write_block(inode);
+            }
+            
+        }
+
+
+        return Ok(CustomInodeFileSystem::new(fs))
     }
 
     fn mountfs(dev: Device) -> Result<Self, Self::Error> {
@@ -95,7 +92,7 @@ impl FileSysSupport for InodeCustomFileSystem {
     }
 }
 
-impl BlockSupport for InodeCustomFileSystem {
+impl BlockSupport for CustomInodeFileSystem {
     fn b_get(&self, i: u64) -> Result<Block, Self::Error> {
         todo!()
     }

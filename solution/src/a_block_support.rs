@@ -47,26 +47,27 @@ use thiserror::Error;
 /// your file system data type so we can just use `FSName` instead of
 /// having to manually figure out your file system name.
 /// **TODO**: replace the below type by the type of your file system
-pub type FSName = BlockCustomFileSystem;
+pub type FSName = CustomBlockFileSystem;
 
 // Custom type
 /// Custom file system data type
-pub struct BlockCustomFileSystem {
-    device: Device 
+pub struct CustomBlockFileSystem {
+    pub device: Device, 
+    pub superblock: SuperBlock
 }
 
 
-impl BlockCustomFileSystem {
+impl CustomBlockFileSystem {
 
     /// Create a new CustomFileSystem given a Device dev
-    pub fn new(dev: Device) -> BlockCustomFileSystem {
-        BlockCustomFileSystem { device: dev }
+    pub fn new(dev: Device, sb: SuperBlock) -> CustomBlockFileSystem {
+        CustomBlockFileSystem { device: dev, superblock: sb }
     }  
 }
 
 #[derive(Error, Debug)]
 /// Custom type for errors in my implementation
-pub enum CustomFileSystemError {
+pub enum CustomBlockFileSystemError {
     #[error("invalid SuperBlock was detected")]
     /// Error thrown when an invalid superblock is encountered
     InvalidSuperBlock,
@@ -87,7 +88,7 @@ pub enum CustomFileSystemError {
     GivenError(#[from] error_given::APIError)
 }
 
-impl FileSysSupport for BlockCustomFileSystem {
+impl FileSysSupport for CustomBlockFileSystem {
 
     fn sb_valid(sb: &SuperBlock) -> bool {
         // the bitmap starts after the inodes
@@ -117,7 +118,7 @@ impl FileSysSupport for BlockCustomFileSystem {
         // Check if the given superblock is a valid file system superblock
         let sb_cond = Self::sb_valid(sb);
         if !sb_cond {
-            return Err(CustomFileSystemError::InvalidSuperBlock);
+            return Err(CustomBlockFileSystemError::InvalidSuperBlock);
         } else  {
            // I think we only have to write the sb, since everything is init to 0
            //Create a new Device at the given path, to allow the file system to communicate with it
@@ -128,7 +129,7 @@ impl FileSysSupport for BlockCustomFileSystem {
            //Block::serialize_into(&mut block, sb, 0)?;
            // write this block to the device
            device.write_block(&block)?;
-           return Ok(BlockCustomFileSystem::new(device));
+           return Ok(CustomBlockFileSystem::new(device, *sb));
         }     
     }
 
@@ -141,24 +142,24 @@ impl FileSysSupport for BlockCustomFileSystem {
         if Self::sb_valid(&superblock) {
             // The block size and number of blocks of the device and superblock agree
             if dev.block_size == superblock.block_size && dev.nblocks == superblock.nblocks {
-                return Ok(BlockCustomFileSystem::new(dev))
+                return Ok(CustomBlockFileSystem::new(dev, superblock))
             }
             else {
-                return Err(CustomFileSystemError::IncompatibleDeviceSuperBlock);
+                return Err(CustomBlockFileSystemError::IncompatibleDeviceSuperBlock);
             }            
         }
         else {
-            return Err(CustomFileSystemError::InvalidSuperBlock);
+            return Err(CustomBlockFileSystemError::InvalidSuperBlock);
         }
     }
     // Unmount the give file system, thereby consuming it Returns the image of the file system, i.e. the Device backing it
     fn unmountfs(self) -> Device {
         return self.device
     }
-    type Error = CustomFileSystemError;
+    type Error = CustomBlockFileSystemError;
 }
 
-impl BlockSupport for BlockCustomFileSystem {
+impl BlockSupport for CustomBlockFileSystem {
     //Read the nth block of the entire disk and return it
     fn b_get(&self, i: u64) -> Result<Block, Self::Error> {
         let block = self.device.read_block(i)?;
@@ -176,7 +177,7 @@ impl BlockSupport for BlockCustomFileSystem {
         let superblock = self.sup_get()?;
         // Index i is out of bounds, it is higher than the number of data blocks
         if i > superblock.ndatablocks - 1 {
-            return Err(CustomFileSystemError::DataIndexOutOfBounds);
+            return Err(CustomBlockFileSystemError::DataIndexOutOfBounds);
         }
         // bitmap can be mutiple blocks large, we have to select the right one
         let bitmapblockcapacity = superblock.block_size * 8;
@@ -194,7 +195,7 @@ impl BlockSupport for BlockCustomFileSystem {
         let or = byte[0] | !set_byte;
         if or == !set_byte {
             // ith block is already a free block
-            return Err(CustomFileSystemError::BlockIsAlreadyFree);
+            return Err(CustomBlockFileSystemError::BlockIsAlreadyFree);
         }
         else{
             let and = byte[0] & !set_byte;
@@ -209,7 +210,7 @@ impl BlockSupport for BlockCustomFileSystem {
         // Index i is out of bounds, if it is higher than the number of data blocks
         if i > superblock.ndatablocks - 1 {
             // **TODO** out of bounds error here
-            return Err(CustomFileSystemError::DataIndexOutOfBounds)
+            return Err(CustomBlockFileSystemError::DataIndexOutOfBounds)
         }
         self.b_put(&Block::new_zero(superblock.datastart + i, superblock.block_size))
         
@@ -233,7 +234,7 @@ impl BlockSupport for BlockCustomFileSystem {
                         // if we go past this we are looking in a part of the last
                         // bitmap block that is not allocated for the bitmap
                         if index > superblock.ndatablocks - 1{
-                            return Err(CustomFileSystemError::NoFreeDataBlock);  
+                            return Err(CustomBlockFileSystemError::NoFreeDataBlock);  
                         } 
                         let new_byte = byte[0] | set_byte;
                         bitmap_block.write_data(&[new_byte], y)?;
@@ -245,7 +246,7 @@ impl BlockSupport for BlockCustomFileSystem {
             }
         }
         // nothing changed
-        return Err(CustomFileSystemError::NoFreeDataBlock);     
+        return Err(CustomBlockFileSystemError::NoFreeDataBlock);     
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
