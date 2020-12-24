@@ -55,7 +55,7 @@ impl CustomInodeFileSystem {
 #[derive(Error, Debug)]
 /// Custom type for errors in my implementation
 pub enum CustomInodeFileSystemError {
-    /// There was a problem in the block layer
+    /// An error occured in the block layer
     #[error("BlockFileSystemError")]
     GivenError(#[from] a_block_support::CustomBlockFileSystemError)
 }
@@ -67,13 +67,21 @@ impl FileSysSupport for CustomInodeFileSystem {
         return CustomBlockFileSystem::sb_valid(sb);
     }
 
+    // watch out for the inodes; an all-0 inode will not necessarily come out well during deserialization, and probably needs to be overwritten by an actually free inode
+    // if you need to read/write multiple inodes in the same block, only load and store this block once!
     fn mkfs<P: AsRef<std::path::Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error> {
         let fs = CustomBlockFileSystem::mkfs(path, sb)?;
         let inodestart = sb.inodestart;
-        for x in 0..sb.ninodes{
-            let inodes_block = sb.block_size / *DINODE_SIZE;
-            for y in 0..inodes_block {
+        let nb_inodes_block = sb.block_size / *DINODE_SIZE;
+        let blocks = sb.ninodes / nb_inodes_block;
+        // for every inode block
+        for x in 0..blocks{
+            let mut block = fs.device.read_block(x)?;
+            // for every inode in this in block
+            for y in 0..nb_inodes_block {
                 let inode = DInode::default();
+                let offset = y * (*DINODE_SIZE);
+                block.serialize_into(&inode, offset)?;
                 fs.device.write_block(inode);
             }
             
@@ -94,31 +102,38 @@ impl FileSysSupport for CustomInodeFileSystem {
 
 impl BlockSupport for CustomInodeFileSystem {
     fn b_get(&self, i: u64) -> Result<Block, Self::Error> {
-        todo!()
+        let block = self.block_system.b_get(i)?;
+        return Ok(block);      
     }
 
     fn b_put(&mut self, b: &Block) -> Result<(), Self::Error> {
-        todo!()
+        let result = self.block_system.b_put(b)?;
+        return Ok(result);
     }
 
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
-        todo!()
+        let result = self.block_system.b_free(i)?;
+        return Ok(result)
     }
 
     fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
-        todo!()
+        let result = self.block_system.b_zero(i)?;
+        return Ok(result);
     }
 
     fn b_alloc(&mut self) -> Result<u64, Self::Error> {
-        todo!()
+        let index = self.block_system.b_alloc()?;
+        return Ok(index);
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
-        todo!()
+        let superblock = self.sup_get()?;
+        return Ok(superblock);
     }
 
     fn sup_put(&mut self, sup: &SuperBlock) -> Result<(), Self::Error> {
-        todo!()
+        let result = self.sup_put(sup)?;
+        return Ok(result);
     }
 }
 

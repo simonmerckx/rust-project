@@ -52,13 +52,15 @@ pub type FSName = CustomBlockFileSystem;
 // Custom type
 /// Custom file system data type
 pub struct CustomBlockFileSystem {
+    /// Device type representing the state of the hard drive disk 
+    /// allows to  read disk blocks from the disk, and write disk blocks to the disk
     pub device: Device, 
+    /// SuperBlock type representing all file system metadata
     pub superblock: SuperBlock
 }
 
 
 impl CustomBlockFileSystem {
-
     /// Create a new CustomFileSystem given a Device dev
     pub fn new(dev: Device, sb: SuperBlock) -> CustomBlockFileSystem {
         CustomBlockFileSystem { device: dev, superblock: sb }
@@ -209,7 +211,6 @@ impl BlockSupport for CustomBlockFileSystem {
         let superblock = self.sup_get()?;
         // Index i is out of bounds, if it is higher than the number of data blocks
         if i > superblock.ndatablocks - 1 {
-            // **TODO** out of bounds error here
             return Err(CustomBlockFileSystemError::DataIndexOutOfBounds)
         }
         self.b_put(&Block::new_zero(superblock.datastart + i, superblock.block_size))
