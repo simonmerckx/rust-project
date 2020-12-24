@@ -57,8 +57,12 @@ impl CustomInodeFileSystem {
 pub enum CustomInodeFileSystemError {
     /// An error occured in the block layer
     #[error("BlockFileSystemError")]
-    GivenError(#[from] a_block_support::CustomBlockFileSystemError)
+    GivenError(#[from] a_block_support::CustomBlockFileSystemError),
+    /// The input provided to some method in the controller layer was invalid
+    #[error("API error")]
+    APIError(#[from] error_given::APIError)
 }
+
 
 impl FileSysSupport for CustomInodeFileSystem {
     type Error = CustomInodeFileSystemError;
@@ -67,27 +71,37 @@ impl FileSysSupport for CustomInodeFileSystem {
         return CustomBlockFileSystem::sb_valid(sb);
     }
 
-    // watch out for the inodes; an all-0 inode will not necessarily come out well during deserialization, and probably needs to be overwritten by an actually free inode
+    // watch out for the inodes; an all-0 inode will not necessarily come out well during deserialization, 
+    // and probably needs to be overwritten by an actually free inode
     // if you need to read/write multiple inodes in the same block, only load and store this block once!
     fn mkfs<P: AsRef<std::path::Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error> {
         let fs = CustomBlockFileSystem::mkfs(path, sb)?;
         let inodestart = sb.inodestart;
         let nb_inodes_block = sb.block_size / *DINODE_SIZE;
-        let blocks = sb.ninodes / nb_inodes_block;
+        let blocks = sb.bmapstart - inodestart;
         // for every inode block
         for x in 0..blocks{
-            let mut block = fs.device.read_block(x)?;
+            // The number of inodes does not 
+            // necessarily have to fill up the entire region
+            let block_stop = x * nb_inodes_block;
+            if block_stop > sb.ninodes {
+                break
+            }
+            let mut block = fs.device.read_block(inodestart + x)?;
             // for every inode in this in block
             for y in 0..nb_inodes_block {
+                // The number of inodes does not 
+                // necessarily have to fill up the entire region
+                let stopcond2 = y + block_stop;
+                if stopcond2 > sb.ninodes{
+                    break
+                }
                 let inode = DInode::default();
                 let offset = y * (*DINODE_SIZE);
                 block.serialize_into(&inode, offset)?;
-                fs.device.write_block(inode);
             }
             
         }
-
-
         return Ok(CustomInodeFileSystem::new(fs))
     }
 
