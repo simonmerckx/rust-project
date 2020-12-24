@@ -100,6 +100,10 @@ impl FileSysSupport for CustomBlockFileSystem {
         // One block for the Superblock
         let order_cond3 =  sb.inodestart > 0;  
         // The inode region has to be sufficiently large to hold ninodes inodes 
+        // Check the ordering
+        if sb.datastart < sb.bmapstart || sb.bmapstart < sb.inodestart || sb.datastart < sb.bmapstart{
+            return false
+        }
         let inode_cond =  *DINODE_SIZE * sb.ninodes <= (sb.bmapstart - sb.inodestart) * sb.block_size;
         // The bitmap needs to provide place for at least 1 bit for every datablock
         let hold_cond1 = (sb.datastart - sb.bmapstart) * sb.block_size * 8 >= sb.ndatablocks;

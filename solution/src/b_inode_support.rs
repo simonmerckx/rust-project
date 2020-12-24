@@ -96,9 +96,9 @@ impl FileSysSupport for CustomInodeFileSystem {
                 if stopcond2 > sb.ninodes{
                     break
                 }
-                let inode = DInode::default();
+                let dinode = DInode::default();
                 let offset = y * (*DINODE_SIZE);
-                block.serialize_into(&inode, offset)?;
+                block.serialize_into(&dinode, offset)?;
             }
             
         }
@@ -106,11 +106,12 @@ impl FileSysSupport for CustomInodeFileSystem {
     }
 
     fn mountfs(dev: Device) -> Result<Self, Self::Error> {
-        todo!()
+        let block_fs = CustomBlockFileSystem::mountfs(dev)?;
+        return Ok(CustomInodeFileSystem::new(block_fs));
     }
 
     fn unmountfs(self) -> Device {
-        todo!()
+        return self.block_system.device;
     }
 }
 
@@ -141,12 +142,12 @@ impl BlockSupport for CustomInodeFileSystem {
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
-        let superblock = self.sup_get()?;
+        let superblock = self.block_system.sup_get()?;
         return Ok(superblock);
     }
 
     fn sup_put(&mut self, sup: &SuperBlock) -> Result<(), Self::Error> {
-        let result = self.sup_put(sup)?;
+        let result = self.block_system.sup_put(sup)?;
         return Ok(result);
     }
 }
