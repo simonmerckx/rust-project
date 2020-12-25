@@ -94,16 +94,16 @@ impl FileSysSupport for CustomBlockFileSystem {
 
     fn sb_valid(sb: &SuperBlock) -> bool {
         // the bitmap starts after the inodes
-        let order_cond1 = sb.inodestart < sb.bmapstart;
+        if !(sb.inodestart < sb.bmapstart) {
+            return false
+        }
         // at least one block for the bit map
-        let order_cond2 = sb.bmapstart < sb.datastart;
+        if !(sb.bmapstart < sb.datastart) {
+            return false
+        }
         // One block for the Superblock
         let order_cond3 =  sb.inodestart > 0;  
         // The inode region has to be sufficiently large to hold ninodes inodes 
-        // Check the ordering
-        if sb.datastart < sb.bmapstart || sb.bmapstart < sb.inodestart || sb.datastart < sb.bmapstart{
-            return false
-        }
         let inode_cond =  *DINODE_SIZE * sb.ninodes <= (sb.bmapstart - sb.inodestart) * sb.block_size;
         // The bitmap needs to provide place for at least 1 bit for every datablock
         let hold_cond1 = (sb.datastart - sb.bmapstart) * sb.block_size * 8 >= sb.ndatablocks;
@@ -112,7 +112,7 @@ impl FileSysSupport for CustomBlockFileSystem {
         // The regions have to physically fit on the disk together, i.e. fall within the first nblocks blocks
         // SuperBlock (= always 1 block) + Innode blocks + BitMap + DataBlocks <= Nblocks
         let fit_cond1 = 1 + (sb.bmapstart - sb.inodestart) + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
-        if order_cond1 && order_cond2 && order_cond3 && hold_cond1 && hold_cond2 && inode_cond && fit_cond1 {
+        if order_cond3 && hold_cond1 && hold_cond2 && inode_cond && fit_cond1 {
             return true
         }
         else {
