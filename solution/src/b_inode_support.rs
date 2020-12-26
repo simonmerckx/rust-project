@@ -150,8 +150,10 @@ impl BlockSupport for CustomInodeFileSystem {
     }
 
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
-        //let result = self.block_system.b_free(i)?;
+        let res = self.block_system.b_free(i)?;
+        return Ok(res)
         //watch out; absolute indices
+        /* 
         let res = match self.block_system.b_free(i) {
             // Custom error so we can check in i_free
             Err(CustomBlockFileSystemError::BlockIsAlreadyFree) => Err(CustomInodeFileSystemError::BlockIsAlreadyFree),
@@ -160,7 +162,8 @@ impl BlockSupport for CustomInodeFileSystem {
 
         };
         println!("{:?}", res);
-        return res
+        */
+        
     }
 
     fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
@@ -220,7 +223,14 @@ impl InodeSupport for CustomInodeFileSystem {
         
         if inode.disk_node.nlink == 0 {
             let file_blocks = inode.disk_node.direct_blocks;
-            for i in &file_blocks{
+            for index in &file_blocks{
+                // self.block_system.superblock.datastart < *index 
+                // 0 elements in array
+                if !(*index == 0) {
+                    self.b_free(*index - self.block_system.superblock.datastart)?;
+                }
+                
+                /* 
                 let _ = match self.b_free(*i) {
                     // The block is actually freed so no problem
                     Err(CustomInodeFileSystemError::BlockIsAlreadyFree) => Ok(()),
@@ -228,6 +238,7 @@ impl InodeSupport for CustomInodeFileSystem {
                     Err(e) => Err(e),
                     Ok(_) => Ok(())
                 };
+                */
             }
             inode.disk_node.ft = FType::TFree;
             inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
@@ -256,14 +267,10 @@ impl InodeSupport for CustomInodeFileSystem {
         //let mut disk_inode = self.i_get(inode.inum)?;
         inode.disk_node.size = 0;
         let file_blocks = inode.disk_node.direct_blocks;
-        for i in &file_blocks{
-            let _ = match self.b_free(*i) {
-                // The block is actually freed so no problem
-                Err(CustomInodeFileSystemError::BlockIsAlreadyFree) => Ok(()),
-                // Other errors should be passed
-                Err(e) => Err(e),
-                Ok(_) => Ok(())
-            };
+        for index in &file_blocks{
+            if !(*index == 0) {
+                self.b_free(*index - self.block_system.superblock.datastart)?;
+            }
         }
         inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
         self.i_put(&inode)?;
