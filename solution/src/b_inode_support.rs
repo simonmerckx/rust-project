@@ -15,7 +15,7 @@
 //! or you want to explain your approach, write it down after the comments
 //! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
-//! COMPLETED: ?
+//! COMPLETED: PARTIAL
 //!
 //! COMMENTS:
 //!
@@ -26,7 +26,7 @@ use cplfs_api::{fs::InodeSupport, types::{DInode, SuperBlock}};
 // import BlockSupport
 use cplfs_api::fs::BlockSupport;
 use cplfs_api::types::{Block, Inode};
-use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::Buffer, types::{DINODE_SIZE, SUPERBLOCK_SIZE}};
+use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::FType, types::{DINODE_SIZE, SUPERBLOCK_SIZE}};
 use thiserror::Error;
 
 use crate::a_block_support::{self, CustomBlockFileSystem};
@@ -41,14 +41,16 @@ pub type FSName = CustomInodeFileSystem;
 /// Custom file system data type
 pub struct CustomInodeFileSystem {
     //device: Device,
-    block_system: CustomBlockFileSystem
+    block_system: CustomBlockFileSystem,
+    inode_start: u64,
+    nb_inodes_block: u64
 }
 
 impl CustomInodeFileSystem {
 
     /// Create a new InodeCustomFileSystem given a BlockCustomFileSystem
-    pub fn new(blockfs: CustomBlockFileSystem) -> CustomInodeFileSystem {
-        CustomInodeFileSystem {  block_system: blockfs }
+    pub fn new(blockfs: CustomBlockFileSystem, is: u64, nib: u64) -> CustomInodeFileSystem {
+        CustomInodeFileSystem {  block_system: blockfs, inode_start: is, nb_inodes_block: nib }
     }  
 }
 
@@ -60,7 +62,19 @@ pub enum CustomInodeFileSystemError {
     GivenError(#[from] a_block_support::CustomBlockFileSystemError),
     /// The input provided to some method in the controller layer was invalid
     #[error("API error")]
-    APIError(#[from] error_given::APIError)
+    APIError(#[from] error_given::APIError),
+    /// Error thrown when an index is greater than the number of 
+    /// inodes in the system.
+    #[error("The provided inode index is out of bounds")]
+    InodeIndexOutOfBounds,
+    #[error("The inode trying to be freed is already free")]
+    /// Error thrown when the inode that is trying
+    /// to be freed is already free.
+    InodeAlreadyFree,
+    #[error("There is no free inode available")]
+    /// Thrown when there is no free inode available
+    NoFreeInode,
+
 }
 
 
@@ -75,7 +89,7 @@ impl FileSysSupport for CustomInodeFileSystem {
     // and probably needs to be overwritten by an actually free inode
     // if you need to read/write multiple inodes in the same block, only load and store this block once!
     fn mkfs<P: AsRef<std::path::Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error> {
-        let fs = CustomBlockFileSystem::mkfs(path, sb)?;
+        let mut fs = CustomBlockFileSystem::mkfs(path, sb)?;
         let inodestart = sb.inodestart;
         let nb_inodes_block = sb.block_size / *DINODE_SIZE;
         let blocks = sb.bmapstart - inodestart;
@@ -84,6 +98,7 @@ impl FileSysSupport for CustomInodeFileSystem {
             // The number of inodes does not 
             // necessarily have to fill up the entire region
             let block_stop = x * nb_inodes_block;
+            
             if block_stop > sb.ninodes {
                 break
             }
@@ -99,15 +114,18 @@ impl FileSysSupport for CustomInodeFileSystem {
                 let dinode = DInode::default();
                 let offset = y * (*DINODE_SIZE);
                 block.serialize_into(&dinode, offset)?;
+                fs.device.write_block(&block)?;
             }
             
         }
-        return Ok(CustomInodeFileSystem::new(fs))
+        return Ok(CustomInodeFileSystem::new(fs, inodestart, nb_inodes_block))
     }
 
     fn mountfs(dev: Device) -> Result<Self, Self::Error> {
         let block_fs = CustomBlockFileSystem::mountfs(dev)?;
-        return Ok(CustomInodeFileSystem::new(block_fs));
+        let nb_inodes_block = block_fs.superblock.block_size / *DINODE_SIZE;
+        let inode_start = block_fs.superblock.inodestart;
+        return Ok(CustomInodeFileSystem::new(block_fs,inode_start , nb_inodes_block));
     }
 
     fn unmountfs(self) -> Device {
@@ -152,31 +170,75 @@ impl BlockSupport for CustomInodeFileSystem {
     }
 }
 
-/*
-impl InodeSupport for BlockCustomFileSystem {
-    type Inode;
+
+impl InodeSupport for CustomInodeFileSystem {
+    type Inode = Inode;
 
     fn i_get(&self, i: u64) -> Result<Self::Inode, Self::Error> {
-        todo!()
+        if i > self.block_system.superblock.ninodes - 1{
+            return Err(CustomInodeFileSystemError::InodeIndexOutOfBounds);
+        }
+        let required_block = i / self.nb_inodes_block;
+        let block = self.block_system.device.read_block(self.inode_start + required_block)?;
+        let offset = (i % self.nb_inodes_block) * (*DINODE_SIZE);
+        let dinode = block.deserialize_from(offset)?;
+        return Ok(Inode::new(i, dinode));
     }
 
     fn i_put(&mut self, ino: &Self::Inode) -> Result<(), Self::Error> {
-        todo!()
+        let block_nb = ino.inum / self.nb_inodes_block;
+        let mut block = self.block_system.device.read_block(self.inode_start + block_nb)?;
+        let offset = (ino.inum % self.nb_inodes_block) * (*DINODE_SIZE);
+        block.serialize_into(&ino.disk_node, offset)?;
+        let result = self.b_put(&block)?;
+        return Ok(result);
     }
 
     fn i_free(&mut self, i: u64) -> Result<(), Self::Error> {
-        todo!()
+        if i > self.block_system.superblock.ninodes - 1  {
+            return Err(CustomInodeFileSystemError::InodeIndexOutOfBounds);
+        }
+        let mut inode = self.i_get(i)?;
+
+        if inode.disk_node.ft == FType::TFree {
+            return Err(CustomInodeFileSystemError::InodeAlreadyFree);
+        }
+
+        if inode.disk_node.nlink == 0 {
+            let file_blocks = inode.disk_node.direct_blocks;
+            for i in &file_blocks{
+                self.b_free(*i)?;
+            }
+            inode.disk_node.ft = FType::TFree;
+            inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
+            self.i_put(&inode)?;
+        }
+        return Ok(())
     }
 
     fn i_alloc(&mut self, ft: cplfs_api::types::FType) -> Result<u64, Self::Error> {
-        todo!()
+        let ninodes = self.block_system.superblock.ninodes;
+        // The inode with index 0 should never be allocated.
+        for y in 1..ninodes {
+            let mut inode = self.i_get(y)?;
+            if inode.disk_node.ft == FType::TFree {
+                inode.disk_node.ft = ft;
+                inode.disk_node.size = 0;
+                inode.disk_node.nlink = 0;
+                self.i_put(&inode)?;
+                return Ok(y);
+            }
+        }      
+        return Err(CustomInodeFileSystemError::NoFreeInode)
     }
 
     fn i_trunc(&mut self, inode: &mut Self::Inode) -> Result<(), Self::Error> {
-        todo!()
+        let mut disk_inode = self.i_get(inode.inum)?;
+        disk_inode.disk_node.size = 0;
+        return Ok(())
     }
 }
-*/
+
 
 // **TODO** define your own tests here.
 
