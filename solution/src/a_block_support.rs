@@ -205,7 +205,7 @@ impl BlockSupport for CustomBlockFileSystem {
         }
         else{
             let and = byte[0] & !set_byte;
-            let res = bitmap_block.write_data(&[and], byte_offset )?;
+            let res = bitmap_block.write_data(&[and], byte_offset)?;
             self.b_put(&bitmap_block)?;
             return Ok(res)
         }    

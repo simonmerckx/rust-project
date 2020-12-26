@@ -21,6 +21,7 @@
 //!
 //! ...
 //!
+use a_block_support::CustomBlockFileSystemError;
 // import SuperBlock
 use cplfs_api::{fs::InodeSupport, types::{DInode, SuperBlock}};
 // import BlockSupport
@@ -60,12 +61,12 @@ pub enum CustomInodeFileSystemError {
     /// An error occured in the block layer
     #[error("BlockFileSystemError")]
     GivenError(#[from] a_block_support::CustomBlockFileSystemError),
-    /// The input provided to some method in the controller layer was invalid
     #[error("API error")]
+    /// The input provided to some method in the controller layer was invalid
     APIError(#[from] error_given::APIError),
+    #[error("The provided inode index is out of bounds")]
     /// Error thrown when an index is greater than the number of 
     /// inodes in the system.
-    #[error("The provided inode index is out of bounds")]
     InodeIndexOutOfBounds,
     #[error("The inode trying to be freed is already free")]
     /// Error thrown when the inode that is trying
@@ -74,6 +75,10 @@ pub enum CustomInodeFileSystemError {
     #[error("There is no free inode available")]
     /// Thrown when there is no free inode available
     NoFreeInode,
+    #[error("The block that was tried to be freed is already free")]
+    /// Thrown when the block that is trying to be freed is already free
+    BlockIsAlreadyFree,
+
 
 }
 
@@ -145,8 +150,17 @@ impl BlockSupport for CustomInodeFileSystem {
     }
 
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
-        let result = self.block_system.b_free(i)?;
-        return Ok(result)
+        //let result = self.block_system.b_free(i)?;
+        //watch out; absolute indices
+        let res = match self.block_system.b_free(i) {
+            // Custom error so we can check in i_free
+            Err(CustomBlockFileSystemError::BlockIsAlreadyFree) => Err(CustomInodeFileSystemError::BlockIsAlreadyFree),
+            Err(e) => Err(e)?,
+            Ok(_) => Ok(())
+
+        };
+        println!("{:?}", res);
+        return res
     }
 
     fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
@@ -198,16 +212,22 @@ impl InodeSupport for CustomInodeFileSystem {
         if i > self.block_system.superblock.ninodes - 1  {
             return Err(CustomInodeFileSystemError::InodeIndexOutOfBounds);
         }
-        let mut inode = self.i_get(i)?;
 
+        let mut inode = self.i_get(i)?;    
         if inode.disk_node.ft == FType::TFree {
             return Err(CustomInodeFileSystemError::InodeAlreadyFree);
         }
-
+        
         if inode.disk_node.nlink == 0 {
             let file_blocks = inode.disk_node.direct_blocks;
             for i in &file_blocks{
-                self.b_free(*i)?;
+                let _ = match self.b_free(*i) {
+                    // The block is actually freed so no problem
+                    Err(CustomInodeFileSystemError::BlockIsAlreadyFree) => Ok(()),
+                    // Other errors should be passed
+                    Err(e) => Err(e),
+                    Ok(_) => Ok(())
+                };
             }
             inode.disk_node.ft = FType::TFree;
             inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
@@ -233,8 +253,21 @@ impl InodeSupport for CustomInodeFileSystem {
     }
 
     fn i_trunc(&mut self, inode: &mut Self::Inode) -> Result<(), Self::Error> {
-        let mut disk_inode = self.i_get(inode.inum)?;
-        disk_inode.disk_node.size = 0;
+        //let mut disk_inode = self.i_get(inode.inum)?;
+        inode.disk_node.size = 0;
+        let file_blocks = inode.disk_node.direct_blocks;
+        for i in &file_blocks{
+            let _ = match self.b_free(*i) {
+                // The block is actually freed so no problem
+                Err(CustomInodeFileSystemError::BlockIsAlreadyFree) => Ok(()),
+                // Other errors should be passed
+                Err(e) => Err(e),
+                Ok(_) => Ok(())
+            };
+        }
+        inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
+        self.i_put(&inode)?;
+
         return Ok(())
     }
 }
