@@ -15,19 +15,18 @@
 //! or you want to explain your approach, write it down after the comments
 //! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
-//! COMPLETED: PARTIAL
+//! COMPLETED: YES
 //!
 //! COMMENTS:
 //!
 //! ...
 //!
-use a_block_support::CustomBlockFileSystemError;
 // import SuperBlock
 use cplfs_api::{fs::InodeSupport, types::{DInode, SuperBlock}};
 // import BlockSupport
 use cplfs_api::fs::BlockSupport;
 use cplfs_api::types::{Block, Inode};
-use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::FType, types::{DINODE_SIZE, SUPERBLOCK_SIZE}};
+use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::FType, types::{DINODE_SIZE}};
 use thiserror::Error;
 
 use crate::a_block_support::{self, CustomBlockFileSystem};
@@ -75,10 +74,6 @@ pub enum CustomInodeFileSystemError {
     #[error("There is no free inode available")]
     /// Thrown when there is no free inode available
     NoFreeInode,
-    #[error("The block that was tried to be freed is already free")]
-    /// Thrown when the block that is trying to be freed is already free
-    BlockIsAlreadyFree,
-
 
 }
 
@@ -198,7 +193,7 @@ impl InodeSupport for CustomInodeFileSystem {
         let required_block = i / self.nb_inodes_block;
         let block = self.block_system.device.read_block(self.inode_start + required_block)?;
         let offset = (i % self.nb_inodes_block) * (*DINODE_SIZE);
-        let dinode = block.deserialize_from(offset)?;
+        let dinode = block.deserialize_from::<DInode>(offset)?;
         return Ok(Inode::new(i, dinode));
     }
 
@@ -232,7 +227,7 @@ impl InodeSupport for CustomInodeFileSystem {
                 }
             }
             inode.disk_node.ft = FType::TFree;
-            inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
+            inode.disk_node.direct_blocks = [0 as u64;12];
             self.i_put(&inode)?;
         }
         return Ok(())
@@ -264,8 +259,8 @@ impl InodeSupport for CustomInodeFileSystem {
             }
         }
         inode.disk_node.size = 0;
-        inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
-        self.i_put(&inode)?;
+        inode.disk_node.direct_blocks = [0 as u64;12];
+        self.i_put(&inode)?; 
 
         return Ok(())
     }
