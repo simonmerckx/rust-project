@@ -223,22 +223,13 @@ impl InodeSupport for CustomInodeFileSystem {
         
         if inode.disk_node.nlink == 0 {
             let file_blocks = inode.disk_node.direct_blocks;
-            for index in &file_blocks{
-                // self.block_system.superblock.datastart < *index 
-                // 0 elements in array
-                if !(*index == 0) {
-                    self.b_free(*index - self.block_system.superblock.datastart)?;
+            println!("inode size {}", inode.disk_node.size );
+            let nb_selected_blocks = (inode.disk_node.size as f64 / self.block_system.superblock.block_size as f64).ceil();
+            for index in 0..(nb_selected_blocks as i64){
+                let element = file_blocks[index as usize];
+                if !(element == 0) {
+                    self.b_free(element - self.block_system.superblock.datastart)?;
                 }
-                
-                /* 
-                let _ = match self.b_free(*i) {
-                    // The block is actually freed so no problem
-                    Err(CustomInodeFileSystemError::BlockIsAlreadyFree) => Ok(()),
-                    // Other errors should be passed
-                    Err(e) => Err(e),
-                    Ok(_) => Ok(())
-                };
-                */
             }
             inode.disk_node.ft = FType::TFree;
             inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
@@ -264,14 +255,15 @@ impl InodeSupport for CustomInodeFileSystem {
     }
 
     fn i_trunc(&mut self, inode: &mut Self::Inode) -> Result<(), Self::Error> {
-        //let mut disk_inode = self.i_get(inode.inum)?;
-        inode.disk_node.size = 0;
         let file_blocks = inode.disk_node.direct_blocks;
-        for index in &file_blocks{
-            if !(*index == 0) {
-                self.b_free(*index - self.block_system.superblock.datastart)?;
+        let selected_blocks = (inode.disk_node.size as f64 / self.block_system.superblock.block_size as f64).ceil();
+        for index in 0..(selected_blocks as i64){
+            let element = file_blocks[index as usize];
+            if !(element == 0) {
+                self.b_free(element - self.block_system.superblock.datastart)?;
             }
         }
+        inode.disk_node.size = 0;
         inode.disk_node.direct_blocks = [0,0,0,0,0,0,0,0,0,0,0,0 as u64];
         self.i_put(&inode)?;
 
