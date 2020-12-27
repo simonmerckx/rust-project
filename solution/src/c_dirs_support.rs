@@ -63,7 +63,11 @@ pub enum CustomDirFileSystemError {
     NoEntryFoundForName,
     #[error("The provided inode is not of directory type")]
     /// The provided inode to search for a directory is not of the right type
-    InodeWrongType
+    InodeWrongType,
+    #[error("The provided name is invalid for a directory entry")]
+    /// The provided name is invalid for a directory entry
+    InvalidEntryName
+
 
 }
 
@@ -165,8 +169,10 @@ impl DirectorySupport for CustomDirFileSystem {
     fn new_de(inum: u64, name: &str) -> Option<DirEntry> {
         let mut dir_entry = DirEntry::default();
         dir_entry.inum = inum;
-        Self::set_name_str(&mut dir_entry, name)?;
-        return Some(dir_entry);
+        match Self::set_name_str(&mut dir_entry, name) {
+            Some(x) => return Some(dir_entry),
+            None => return None
+        }
     }
 
     fn get_name_str(de: &DirEntry) -> String {
@@ -211,25 +217,26 @@ impl DirectorySupport for CustomDirFileSystem {
         if !(inode.disk_node.ft == FType::TDir) {
             return Err(CustomDirFileSystemError::InodeWrongType);
         }
-        let superblock = self.inode_fs.sup_get()?;
+        let superblock = self.sup_get()?;
         let file_blocks = inode.disk_node.direct_blocks;
         let nb_selected_blocks = (inode.disk_node.size as f64/superblock.block_size as f64).ceil(); 
-        for index in 0..(nb_selected_blocks as i64) {
+        for index in 0..(nb_selected_blocks as u64) {
             let element = file_blocks[index as usize];
             if !(element == 0) {
                 let block = self.b_get(element - superblock.datastart)?;
-                let nb_dirs = (superblock.block_size as f64 / *DIRENTRY_SIZE as f64).ceil();
+                let nb_dirs = superblock.block_size/ *DIRENTRY_SIZE;
                 let mut offset = 0 ;
-                for _ in 0..(nb_dirs as i64) {
+                for _ in 0..(nb_dirs) {
                     let dir_entry = block.deserialize_from::<DirEntry>(offset)?;
                     // check if this is not an empty entry
                     if dir_entry.inum != 0 {
+                        // check if the names match
                         if Self::get_name_str(&dir_entry) == *name {
                             let inode = self.i_get(dir_entry.inum)?;
-                            return Ok((inode, offset))
+                            return Ok((inode, superblock.block_size*index + offset))
                         }
                     }
-                    offset = offset + *DIRENTRY_SIZE;
+                    offset += *DIRENTRY_SIZE;
                 }
             }
         }
@@ -237,13 +244,52 @@ impl DirectorySupport for CustomDirFileSystem {
         return Err(CustomDirFileSystemError::NoEntryFoundForName)
     }
 
-    fn dirlink(
-        &mut self,
-        inode: &mut Self::Inode,
-        name: &str,
-        inum: u64,
-    ) -> Result<u64, Self::Error> {
-        todo!()
+    fn dirlink(&mut self,inode: &mut Self::Inode,name: &str,inum: u64,) -> Result<u64, Self::Error> {
+        if !(inode.disk_node.ft == FType::TDir) {
+            return Err(CustomDirFileSystemError::InodeWrongType);
+        }
+        
+        let new_dir_entry = match Self::new_de(inum,name) {
+            None => return Err(CustomDirFileSystemError::InvalidEntryName),
+            Some(dir_entry) => dir_entry
+        };
+
+        let superblock = self.sup_get()?;
+        let file_blocks = inode.disk_node.direct_blocks;
+        let nb_selected_blocks = (inode.disk_node.size as f64/superblock.block_size as f64).ceil(); 
+        for index in 0..(nb_selected_blocks as u64) {
+            let element = file_blocks[index as usize];
+            if !(element == 0) {
+                let mut block = self.b_get(element - superblock.datastart)?;
+                let nb_dirs = superblock.block_size/ *DIRENTRY_SIZE;
+                let mut offset = 0 ;
+                for _ in 0..(nb_dirs) {
+                    let dir_entry = block.deserialize_from::<DirEntry>(offset)?;
+                    // check if we have an empty entry
+                    if dir_entry.inum == 0 {
+                        block.serialize_into(&new_dir_entry, offset)?;
+                        let mut inode = self.i_get(inum)?;
+                        if !(inode.inum == inum) {
+                            inode.disk_node.nlink += 1;
+                            self.i_put(&inode)?;
+                            return Ok(superblock.block_size*index + offset)
+                        }     
+                    }
+                offset += *DIRENTRY_SIZE;
+
+                }
+            }
+        }
+
+        //  In case the directory has no free entries,
+        //  append a new entry to the end and increase the size of inode. 
+        // no free dir entry was found
+
+        return Ok(1)
+        
+
+
+        
     }
 }
 
