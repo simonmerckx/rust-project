@@ -66,8 +66,10 @@ pub enum CustomDirFileSystemError {
     InodeWrongType,
     #[error("The provided name is invalid for a directory entry")]
     /// The provided name is invalid for a directory entry
-    InvalidEntryName
-
+    InvalidEntryName,
+    #[error("Inode corresponding to inum is not currently in use")]
+    /// Inode corresponding to inum is not currently in use.
+    DirectoryInodeNotInUse
 
 }
 
@@ -237,6 +239,9 @@ impl DirectorySupport for CustomDirFileSystem {
                         }
                     }
                     offset += *DIRENTRY_SIZE;
+                    if offset > inode.disk_node.size {
+                        break;
+                    }
                 }
             }
         }
@@ -248,7 +253,13 @@ impl DirectorySupport for CustomDirFileSystem {
         if !(inode.disk_node.ft == FType::TDir) {
             return Err(CustomDirFileSystemError::InodeWrongType);
         }
-        
+
+        let corresponding_inode = self.i_get(inum)?;
+        // errors and does nothing if the inode corresponding to inum is not currently in use.
+        if corresponding_inode.disk_node.ft == FType::TFree {
+            return Err(CustomDirFileSystemError::DirectoryInodeNotInUse);
+        };
+
         let new_dir_entry = match Self::new_de(inum,name) {
             None => return Err(CustomDirFileSystemError::InvalidEntryName),
             Some(dir_entry) => dir_entry
@@ -275,15 +286,30 @@ impl DirectorySupport for CustomDirFileSystem {
                             return Ok(superblock.block_size*index + offset)
                         }     
                     }
-                offset += *DIRENTRY_SIZE;
-
+                    // we are over the size of the inode
+                    // but there is still half a block left
+                    if offset > inode.disk_node.size {
+                        inode.disk_node.size += *DIRENTRY_SIZE;
+                        block.serialize_into(&new_dir_entry, offset)?;
+                        return Ok(superblock.block_size*index + offset)
+                    }
+                    offset += *DIRENTRY_SIZE;
+                    
                 }
             }
         }
 
+
         //  In case the directory has no free entries,
         //  append a new entry to the end and increase the size of inode. 
-        // no free dir entry was found
+        //  no free dir entry was found
+        //  use b_alloc here?
+
+    
+
+
+
+
 
         return Ok(1)
         
