@@ -17,7 +17,7 @@
 //! or you want to explain your approach, write it down after the comments
 //! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
-//! COMPLETED: PARTIAL
+//! COMPLETED: YES
 //!
 //! COMMENTS:
 //!
@@ -62,6 +62,14 @@ pub enum CustomInodeRWFileSystemError {
     #[error("API error")]
     /// The input provided to some method in the controller layer was invalid
     APIError(#[from] error_given::APIError),
+    #[error("The provided buffer is too small for the amount of bites that have to be written")]
+    /// The provided buffer is too small for the amount of bytes that have to be written
+    BufTooSmall,
+    #[error("Writing the contents of the buffer at the given offset would make the inode exceed it's maximum size")]
+    /// Writing the contents of the provided buffer starting at 
+    /// the given offset would make the inode exceed it's maximum size
+    WriteTooLarge
+
 }
 
 
@@ -203,12 +211,89 @@ impl InodeRWSupport for CustomInodeRWFileSystem {
                 }
             }
         }
-
         return Ok(buf_offset);
     }
 
     fn i_write(&mut self,inode: &mut Self::Inode,buf: &cplfs_api::types::Buffer,off: u64, n: u64) -> Result<(), Self::Error> {
-        todo!()
+        // returns an error and does not read anything if index falls further outside of the file's bounds. 
+        if off > inode.disk_node.size {
+            return Err(CustomInodeRWFileSystemError::IndexOutOfBounds);
+        }
+
+        // Returns an error if buf cannot hold at least n bytes of data.
+        if buf.len() < n {
+            return Err(CustomInodeRWFileSystemError::BufTooSmall);
+        }
+
+        // If the write would make the inode exceed its maximum possible size, do nothing and return an error.
+        let sb = self.sup_get()?;
+        if off + n > inode.disk_node.direct_blocks.len() as u64 * sb.block_size {
+            return Err(CustomInodeRWFileSystemError::WriteTooLarge);
+        }
+
+        // Check if the provided inode is large enough, otherwise extend it 
+        // if necessary, start allocating extra blocks to expand the file and continue writing into the new blocks.
+        let current_amount_blocks = (inode.disk_node.size as f64/sb.block_size as f64).ceil();
+        if off + n > (current_amount_blocks as u64 * sb.block_size) {
+            let remaining_bytes = (off + n) - inode.disk_node.size;
+            let amount_of_new_blocks = (remaining_bytes as f64 / sb.block_size as f64).ceil();
+            for i in 0..amount_of_new_blocks as u64 {
+                let new_block_index = sb.datastart + self.b_alloc()?;
+                inode.disk_node.direct_blocks[(current_amount_blocks + i as f64) as usize] = new_block_index;
+            }
+            inode.disk_node.size = off + n;
+            self.i_put(inode)?;
+        }
+
+        // if we have enough blocks but they are not all fully used yet
+        // this if is only entered when we already have a partly
+        // unused block assinged to an inode
+        if off + n <  (current_amount_blocks as u64 * sb.block_size) && (off + n) > inode.disk_node.size { 
+            inode.disk_node.size  = off + n;
+        }
+
+        // write changes back
+        self.i_put(inode)?;
+        let file_blocks = inode.disk_node.direct_blocks;
+        let nb_selected_blocks = (inode.disk_node.size as f64/sb.block_size as f64).ceil(); 
+        let mut buf_offset = 0;
+        for index in 0..(nb_selected_blocks as u64) {
+            // skip the blocks that don't contain bytes we need
+            if (index +1)*sb.block_size < off {
+                continue
+            }
+            // we only want to read n bytes, also stop if buf is full
+            if buf_offset >= n {
+                break
+            }
+            let element = file_blocks[index as usize];
+            if !(element == 0) {
+                // b-get: read the nth block of the entire disk and return it
+                let mut block = self.b_get(element)?;
+                for byte_index in 0..(sb.block_size)  {
+                    if buf_offset >= n  {
+                        break
+                    };
+                    // write only if we are over offset
+                    if index * sb.block_size + byte_index >= off {
+                        let mut byte: [u8;1] = [0];
+                        // read the info out of the buffer into a byte
+                        buf.read_data(&mut byte, buf_offset)?;
+                        // write the byte into the inode
+                        match block.write_data(&byte, byte_index) {
+                            // reached end of the buf, so stop adding
+                            Err(APIError::BlockInput("Trying to write beyond the bounds of the block",)) => break,
+                            // not specified what to do in other cases
+                            Err(_) => (),
+                            Ok(_) => ()
+                        }
+                        buf_offset += 1;
+                    }
+                    self.b_put(&block)?;
+                }
+            }
+        }
+        return Ok(())
     }
 }
 

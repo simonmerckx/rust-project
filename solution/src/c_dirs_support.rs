@@ -305,11 +305,12 @@ impl DirectorySupport for CustomDirFileSystem {
                         } 
                         return Ok(superblock.block_size*index + offset);
                     }
-                    offset +=  *DIRENTRY_SIZE;
-                 
+                    offset +=  *DIRENTRY_SIZE;           
                 }
             }
         }
+
+        
         // if we did not exit the function
         // allocate a new block
         // Returns the index (within the data region) of the newly allocated block.
