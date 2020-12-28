@@ -9,11 +9,6 @@
 //!
 //! # Status
 //!
-//! **TODO**: Replace the question mark below with YES, NO, or PARTIAL to
-//! indicate the status of this assignment. If you want to tell something
-//! about this assignment to the grader, e.g., you have a bug you can't fix,
-//! or you want to explain your approach, write it down after the comments
-//! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
 //! COMPLETED: YES
 //!
@@ -51,7 +46,7 @@ impl CustomInodeFileSystem {
 }
 
 #[derive(Error, Debug)]
-/// Custom type for errors in my implementation
+/// Custom type for errors in CustomInodeFileSystem
 pub enum CustomInodeFileSystemError {
     #[error("BlockFileSystemError")]
     /// An error occured in the block layer

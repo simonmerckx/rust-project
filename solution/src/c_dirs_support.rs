@@ -10,11 +10,6 @@
 //!
 //! # Status
 //!
-//! **TODO**: Replace the question mark below with YES, NO, or PARTIAL to
-//! indicate the status of this assignment. If you want to tell something
-//! about this assignment to the grader, e.g., you have a bug you can't fix,
-//! or you want to explain your approach, write it down after the comments
-//! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
 //! COMPLETED: YES
 //!
@@ -49,7 +44,7 @@ impl CustomDirFileSystem {
 }
 
 #[derive(Error, Debug)]
-/// Custom type for errors in my implementation
+/// Custom type for errors in CustomDirFileSystem
 pub enum CustomDirFileSystemError {
     /// An error occured in the inode layer
     #[error("InodeFileSystemError")]
@@ -310,7 +305,7 @@ impl DirectorySupport for CustomDirFileSystem {
             }
         }
 
-        
+
         // if we did not exit the function
         // allocate a new block
         // Returns the index (within the data region) of the newly allocated block.
