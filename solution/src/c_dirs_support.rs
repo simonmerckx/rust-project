@@ -16,7 +16,7 @@
 //! or you want to explain your approach, write it down after the comments
 //! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
-//! COMPLETED: PARTIAL
+//! COMPLETED: YES
 //!
 //! COMMENTS:
 //!
@@ -37,13 +37,12 @@ pub type FSName = CustomDirFileSystem;
 // Custom type
 /// Custom file system data type
 pub struct CustomDirFileSystem {
-    //device: Device,
     inode_fs: CustomInodeFileSystem,
 }
 
 impl CustomDirFileSystem {
 
-    /// Create a new InodeCustomFileSystem given a BlockCustomFileSystem
+    /// Create a new CustomDirFileSystem given a CustomInodeFileSystem
     pub fn new(inodefs: CustomInodeFileSystem) -> CustomDirFileSystem {
         CustomDirFileSystem {  inode_fs: inodefs }
     }  
@@ -208,7 +207,7 @@ impl DirectorySupport for CustomDirFileSystem {
             let mut index = 0;
             for i in chars {
                 array[index] = i;  
-                index = index + 1;
+                index += 1;
             }
             de.name = array;
             return Some(())
@@ -291,8 +290,6 @@ impl DirectorySupport for CustomDirFileSystem {
                     // we might be over the size of the inode
                     // but there might still place in this block 
                     // to add a dir entry
-                    println!("size: {}", inode.disk_node.size);
-                    println!("dir entry inum: {}", dir_entry.inum );
                     if dir_entry.inum == 0 || offset >= inode.disk_node.size {
                         if offset >= inode.disk_node.size {
                             inode.disk_node.size += *DIRENTRY_SIZE;
@@ -322,7 +319,7 @@ impl DirectorySupport for CustomDirFileSystem {
         new_block.serialize_into(&new_dir_entry, 0)?;  
         // increase the size
         inode.disk_node.size += *DIRENTRY_SIZE;
-        // find fisrt zero and change it with index
+        // find zero element and change it with index
         inode.disk_node.direct_blocks[nb_selected_blocks as usize] = new_block_index;
         // write inode back
         self.i_put(inode)?;

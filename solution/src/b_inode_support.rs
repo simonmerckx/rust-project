@@ -48,7 +48,7 @@ pub struct CustomInodeFileSystem {
 
 impl CustomInodeFileSystem {
 
-    /// Create a new InodeCustomFileSystem given a BlockCustomFileSystem
+    /// Create a new CustomInodeFileSystem given a CustomBlockFileSystem
     pub fn new(blockfs: CustomBlockFileSystem, is: u64, nib: u64) -> CustomInodeFileSystem {
         CustomInodeFileSystem {  block_system: blockfs, inode_start: is, nb_inodes_block: nib }
     }  
@@ -187,11 +187,12 @@ impl InodeSupport for CustomInodeFileSystem {
     type Inode = Inode;
 
     fn i_get(&self, i: u64) -> Result<Self::Inode, Self::Error> {
-        if i > self.block_system.superblock.ninodes - 1{
+        let superblock = self.sup_get()?;
+        if i > superblock.ninodes - 1{
             return Err(CustomInodeFileSystemError::InodeIndexOutOfBounds);
         }
         let required_block = i / self.nb_inodes_block;
-        let block = self.block_system.device.read_block(self.inode_start + required_block)?;
+        let block = self.b_get(self.inode_start + required_block)?;
         let offset = (i % self.nb_inodes_block) * (*DINODE_SIZE);
         let dinode = block.deserialize_from::<DInode>(offset)?;
         return Ok(Inode::new(i, dinode));
@@ -199,7 +200,7 @@ impl InodeSupport for CustomInodeFileSystem {
 
     fn i_put(&mut self, ino: &Self::Inode) -> Result<(), Self::Error> {
         let block_nb = ino.inum / self.nb_inodes_block;
-        let mut block = self.block_system.device.read_block(self.inode_start + block_nb)?;
+        let mut block = self.b_get(self.inode_start + block_nb)?;
         let offset = (ino.inum % self.nb_inodes_block) * (*DINODE_SIZE);
         block.serialize_into(&ino.disk_node, offset)?;
         let result = self.b_put(&block)?;
@@ -207,7 +208,8 @@ impl InodeSupport for CustomInodeFileSystem {
     }
 
     fn i_free(&mut self, i: u64) -> Result<(), Self::Error> {
-        if i > self.block_system.superblock.ninodes - 1  {
+        let sb = self.sup_get()?;
+        if i > sb.ninodes - 1  {
             return Err(CustomInodeFileSystemError::InodeIndexOutOfBounds);
         }
 
@@ -219,11 +221,11 @@ impl InodeSupport for CustomInodeFileSystem {
         if inode.disk_node.nlink == 0 {
             let file_blocks = inode.disk_node.direct_blocks;
             println!("inode size {}", inode.disk_node.size );
-            let nb_selected_blocks = (inode.disk_node.size as f64 / self.block_system.superblock.block_size as f64).ceil();
+            let nb_selected_blocks = (inode.disk_node.size as f64 / sb.block_size as f64).ceil();
             for index in 0..(nb_selected_blocks as i64){
                 let element = file_blocks[index as usize];
                 if !(element == 0) {
-                    self.b_free(element - self.block_system.superblock.datastart)?;
+                    self.b_free(element - sb.datastart)?;
                 }
             }
             inode.disk_node.ft = FType::TFree;
@@ -234,7 +236,8 @@ impl InodeSupport for CustomInodeFileSystem {
     }
 
     fn i_alloc(&mut self, ft: cplfs_api::types::FType) -> Result<u64, Self::Error> {
-        let ninodes = self.block_system.superblock.ninodes;
+        let sb = self.sup_get()?;
+        let ninodes = sb.ninodes;
         // The inode with index 0 should never be allocated.
         for y in 1..ninodes {
             let mut inode = self.i_get(y)?;
@@ -250,12 +253,13 @@ impl InodeSupport for CustomInodeFileSystem {
     }
 
     fn i_trunc(&mut self, inode: &mut Self::Inode) -> Result<(), Self::Error> {
+        let sb = self.sup_get()?;
         let file_blocks = inode.disk_node.direct_blocks;
-        let selected_blocks = (inode.disk_node.size as f64 / self.block_system.superblock.block_size as f64).ceil();
+        let selected_blocks = (inode.disk_node.size as f64 / sb.block_size as f64).ceil();
         for index in 0..(selected_blocks as i64){
             let element = file_blocks[index as usize];
             if !(element == 0) {
-                self.b_free(element - self.block_system.superblock.datastart)?;
+                self.b_free(element - sb.datastart)?;
             }
         }
         inode.disk_node.size = 0;

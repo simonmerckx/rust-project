@@ -61,7 +61,7 @@ pub struct CustomBlockFileSystem {
 
 
 impl CustomBlockFileSystem {
-    /// Create a new CustomFileSystem given a Device dev
+    /// Create a new CustomBlockFileSystem given a Device dev
     pub fn new(dev: Device, sb: SuperBlock) -> CustomBlockFileSystem {
         CustomBlockFileSystem { device: dev, superblock: sb }
     }  
@@ -255,15 +255,19 @@ impl BlockSupport for CustomBlockFileSystem {
     }
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
+        return Ok(self.superblock);
+        /* 
         let sb = self.b_get(0)?;
         let superblock = sb.deserialize_from::<SuperBlock>(0)?;
         return Ok(superblock);
+        */
     }
 
     fn sup_put(&mut self, sup: &SuperBlock) -> Result<(), Self::Error> {
         let mut block = self.b_get(0)?;
         block.serialize_into( sup, 0)?;
         self.b_put(&block)?;
+        self.superblock = *sup;
         return Ok(())
     }
 }
