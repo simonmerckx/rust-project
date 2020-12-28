@@ -172,7 +172,7 @@ impl DirectorySupport for CustomDirFileSystem {
         let mut dir_entry = DirEntry::default();
         dir_entry.inum = inum;
         match Self::set_name_str(&mut dir_entry, name) {
-            Some(x) => return Some(dir_entry),
+            Some(_) => return Some(dir_entry),
             None => return None
         }
     }
@@ -225,7 +225,8 @@ impl DirectorySupport for CustomDirFileSystem {
         for index in 0..(nb_selected_blocks as u64) {
             let element = file_blocks[index as usize];
             if !(element == 0) {
-                let block = self.b_get(element - superblock.datastart)?;
+                // b-get: read the nth block of the entire disk and return it
+                let block = self.b_get(element)?;
                 let nb_dirs = superblock.block_size/ *DIRENTRY_SIZE;
                 let mut offset = 0 ;
                 for _ in 0..(nb_dirs) {
@@ -239,7 +240,7 @@ impl DirectorySupport for CustomDirFileSystem {
                         }
                     }
                     offset += *DIRENTRY_SIZE;
-                    if offset > inode.disk_node.size {
+                    if offset >= inode.disk_node.size {
                         break;
                     }
                 }
@@ -250,20 +251,29 @@ impl DirectorySupport for CustomDirFileSystem {
     }
 
     fn dirlink(&mut self,inode: &mut Self::Inode,name: &str,inum: u64,) -> Result<u64, Self::Error> {
+        // The inode has to be a directory
         if !(inode.disk_node.ft == FType::TDir) {
             return Err(CustomDirFileSystemError::InodeWrongType);
         }
 
-        let corresponding_inode = self.i_get(inum)?;
+        let mut corresponding_inode = self.i_get(inum)?;
         // errors and does nothing if the inode corresponding to inum is not currently in use.
         if corresponding_inode.disk_node.ft == FType::TFree {
             return Err(CustomDirFileSystemError::DirectoryInodeNotInUse);
         };
 
+        //name is invalid
         let new_dir_entry = match Self::new_de(inum,name) {
             None => return Err(CustomDirFileSystemError::InvalidEntryName),
             Some(dir_entry) => dir_entry
         };
+
+        // Name is already an entry inside inode.
+        match self.dirlookup(inode, name) {
+            // the name already exists, so return error
+            Ok(_)=> return Err(CustomDirFileSystemError::InvalidEntryName),
+            Err(_) => ()
+        }
 
         let superblock = self.sup_get()?;
         let file_blocks = inode.disk_node.direct_blocks;
@@ -271,51 +281,59 @@ impl DirectorySupport for CustomDirFileSystem {
         for index in 0..(nb_selected_blocks as u64) {
             let element = file_blocks[index as usize];
             if !(element == 0) {
-                let mut block = self.b_get(element - superblock.datastart)?;
+                // b-get: read the nth block of the entire disk and return it
+                let mut block = self.b_get(element)?;
                 let nb_dirs = superblock.block_size/ *DIRENTRY_SIZE;
                 let mut offset = 0 ;
                 for _ in 0..(nb_dirs) {
                     let dir_entry = block.deserialize_from::<DirEntry>(offset)?;
                     // check if we have an empty entry
-                    if dir_entry.inum == 0 {
-                        block.serialize_into(&new_dir_entry, offset)?;
-                        let mut inode = self.i_get(inum)?;
-                        if !(inode.inum == inum) {
-                            inode.disk_node.nlink += 1;
+                    // we might be over the size of the inode
+                    // but there might still place in this block 
+                    // to add a dir entry
+                    println!("size: {}", inode.disk_node.size);
+                    println!("dir entry inum: {}", dir_entry.inum );
+                    if dir_entry.inum == 0 || offset >= inode.disk_node.size {
+                        if offset >= inode.disk_node.size {
+                            inode.disk_node.size += *DIRENTRY_SIZE;
                             self.i_put(&inode)?;
-                            return Ok(superblock.block_size*index + offset)
-                        }     
+                        }
+                        block.serialize_into(&new_dir_entry, offset)?;  
+                        // write block back to disk
+                        self.b_put(&block)?;
+                        // if inum and inode's number are equal, then nothing happens
+                        if !(inode.inum == inum) {
+                            corresponding_inode.disk_node.nlink += 1;
+                            self.i_put(&corresponding_inode)?;      
+                        } 
+                        return Ok(superblock.block_size*index + offset);
                     }
-                    // we are over the size of the inode
-                    // but there is still half a block left
-                    if offset > inode.disk_node.size {
-                        inode.disk_node.size += *DIRENTRY_SIZE;
-                        block.serialize_into(&new_dir_entry, offset)?;
-                        return Ok(superblock.block_size*index + offset)
-                    }
-                    offset += *DIRENTRY_SIZE;
-                    
+                    offset +=  *DIRENTRY_SIZE;
+                 
                 }
             }
         }
-
-
-        //  In case the directory has no free entries,
-        //  append a new entry to the end and increase the size of inode. 
-        //  no free dir entry was found
-        //  use b_alloc here?
-
-    
-
-
-
-
-
-        return Ok(1)
-        
-
-
-        
+        // if we did not exit the function
+        // allocate a new block
+        // Returns the index (within the data region) of the newly allocated block.
+        let new_block_index = superblock.datastart + self.b_alloc()?;
+        let mut new_block = self.b_get(new_block_index)?;
+        // we start at the beginning of the block
+        new_block.serialize_into(&new_dir_entry, 0)?;  
+        // increase the size
+        inode.disk_node.size += *DIRENTRY_SIZE;
+        // find fisrt zero and change it with index
+        inode.disk_node.direct_blocks[nb_selected_blocks as usize] = new_block_index;
+        // write inode back
+        self.i_put(inode)?;
+        // put the block back on disk
+        self.b_put(&new_block)?;
+        corresponding_inode = self.i_get(inum)?;
+        if !(corresponding_inode.inum == inum) {
+            corresponding_inode.disk_node.nlink += 1;
+            self.i_put(&corresponding_inode)?;      
+        } 
+        return Ok(inode.disk_node.size -  *DIRENTRY_SIZE);       
     }
 }
 

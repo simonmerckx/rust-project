@@ -130,6 +130,7 @@ fn dirlookup_link_root() {
         assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 2);
     }
     for i in 0..5 {
+        println!("i: {}", i);
         assert_eq!(
             my_fs.dirlink(&mut iroot, &i.to_string(), 3).unwrap(),
             i * *DIRENTRY_SIZE
