@@ -21,41 +21,28 @@
 //! ...
 //!
 
-// Turn off the warnings we get from the below example imports, which are currently unused.
-// TODO: this should be removed once you are done implementing this file. You can remove all of the below imports you do not need, as they are simply there to illustrate how you can import things.
-#![allow(unused_imports)]
-// We import std::error and std::format so we can say error::Error instead of
-// std::error::Error, etc.
-use std::{error, io};
-use std::fmt;
 use std::path::Path;
 
-
 // If you want to import things from the API crate, do so as follows:
-use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::Buffer, types::{DINODE_SIZE, SUPERBLOCK_SIZE}};
+use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::{DINODE_SIZE}};
 // import SuperBlock
 use cplfs_api::types::SuperBlock;
 // import BlockSupport
 use cplfs_api::fs::BlockSupport;
-use cplfs_api::types::{Block, Inode};
+use cplfs_api::types::{Block};
 
 // use auxiliary package thiserror to make the definition of errors easier
 use thiserror::Error;
 
-/// You are free to choose the name for your file system. As we will use
-/// automated tests when grading your assignment, indicate here the name of
-/// your file system data type so we can just use `FSName` instead of
-/// having to manually figure out your file system name.
-/// **TODO**: replace the below type by the type of your file system
+/// Custom type 
 pub type FSName = CustomBlockFileSystem;
 
-// Custom type
-/// Custom file system data type
+/// Custom block file system data type
 pub struct CustomBlockFileSystem {
     /// Device type representing the state of the hard drive disk 
-    /// allows to  read disk blocks from the disk, and write disk blocks to the disk
+    /// allows to read disk blocks from the disk, and write disk blocks to the disk
     pub device: Device, 
-    /// SuperBlock type representing all file system metadata
+    /// Cached SuperBlock
     pub superblock: SuperBlock
 }
 
@@ -68,13 +55,13 @@ impl CustomBlockFileSystem {
 }
 
 #[derive(Error, Debug)]
-/// Custom type for errors in my implementation
+/// Custom type for errors in CustomBlockFileSystem
 pub enum CustomBlockFileSystemError {
     #[error("invalid SuperBlock was detected")]
     /// Error thrown when an invalid superblock is encountered
     InvalidSuperBlock,
     #[error("SuperBlock and device are not compatible")]
-    /// Thrown when the device and superblock don't agree
+    /// Error thrown when the device and superblock don't agree
     IncompatibleDeviceSuperBlock,
     #[error("The data index is out of bounds for this device")]
     /// Thrown when the block index provided is larger than ndatablocks - 1
@@ -83,7 +70,7 @@ pub enum CustomBlockFileSystemError {
     /// Thrown when the block that is trying to be freed is already free
     BlockIsAlreadyFree,
     #[error("There is no free data block")]
-    /// Thrown when there is no free data block 
+    /// Thrown when there is no free data block available and one is requested 
     NoFreeDataBlock,
     /// The input provided to some method in the controller layer was invalid
     #[error("API error")]
@@ -91,7 +78,6 @@ pub enum CustomBlockFileSystemError {
 }
 
 impl FileSysSupport for CustomBlockFileSystem {
-
     fn sb_valid(sb: &SuperBlock) -> bool {
         // the bitmap starts after the inodes
         if !(sb.inodestart < sb.bmapstart) {
@@ -105,12 +91,11 @@ impl FileSysSupport for CustomBlockFileSystem {
         let order_cond3 =  sb.inodestart > 0;  
         // The inode region has to be sufficiently large to hold ninodes inodes 
         let inode_cond =  *DINODE_SIZE * sb.ninodes <= (sb.bmapstart - sb.inodestart) * sb.block_size;
-        // The bitmap needs to provide place for at least 1 bit for every datablock
+        // The bitmap needs to provide place for 1 bit for every datablock
         let hold_cond1 = (sb.datastart - sb.bmapstart) * sb.block_size * 8 >= sb.ndatablocks;
         // There needs to be enough space for the datablocks
         let hold_cond2 = sb.datastart + sb.ndatablocks <= sb.nblocks;
         // The regions have to physically fit on the disk together, i.e. fall within the first nblocks blocks
-        // SuperBlock (= always 1 block) + Innode blocks + BitMap + DataBlocks <= Nblocks
         let fit_cond1 = 1 + (sb.bmapstart - sb.inodestart) + (sb.datastart - sb.bmapstart) + sb.ndatablocks <= sb.nblocks;
         if order_cond3 && hold_cond1 && hold_cond2 && inode_cond && fit_cond1 {
             return true
@@ -126,21 +111,17 @@ impl FileSysSupport for CustomBlockFileSystem {
         if !sb_cond {
             return Err(CustomBlockFileSystemError::InvalidSuperBlock);
         } else  {
-           // I think we only have to write the sb, since everything is init to 0
            //Create a new Device at the given path, to allow the file system to communicate with it
            let mut device = Device::new(path, sb.block_size, sb.nblocks)?;
            // A super block containing the file system metadata at block index 0
            let mut block = device.read_block(0)?;
            block.serialize_into(sb, 0)?;
-           //Block::serialize_into(&mut block, sb, 0)?;
            // write this block to the device
            device.write_block(&block)?;
            return Ok(CustomBlockFileSystem::new(device, *sb));
         }     
     }
 
-    // Given an existing Device called dev, make sure that its image corresponds to 
-    // a valid file system 
     fn mountfs(dev: Device) -> Result<Self, Self::Error> {
         // The superblock is a valid superblock 
         let sb_block = dev.read_block( 0)?;
@@ -158,10 +139,11 @@ impl FileSysSupport for CustomBlockFileSystem {
             return Err(CustomBlockFileSystemError::InvalidSuperBlock);
         }
     }
-    // Unmount the give file system, thereby consuming it Returns the image of the file system, i.e. the Device backing it
+
     fn unmountfs(self) -> Device {
         return self.device
     }
+
     type Error = CustomBlockFileSystemError;
 }
 
@@ -181,7 +163,7 @@ impl BlockSupport for CustomBlockFileSystem {
     // Free the ith block in the block data region, by setting the ith bit in the free bit map region to zero.
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
         let superblock = self.sup_get()?;
-        // Index i is out of bounds, it is higher than the number of data blocks
+        // Index i is out of bounds, if it's higher than the number of data blocks
         if i > superblock.ndatablocks - 1 {
             return Err(CustomBlockFileSystemError::DataIndexOutOfBounds);
         }
@@ -256,11 +238,6 @@ impl BlockSupport for CustomBlockFileSystem {
 
     fn sup_get(&self) -> Result<SuperBlock, Self::Error> {
         return Ok(self.superblock);
-        /* 
-        let sb = self.b_get(0)?;
-        let superblock = sb.deserialize_from::<SuperBlock>(0)?;
-        return Ok(superblock);
-        */
     }
 
     fn sup_put(&mut self, sup: &SuperBlock) -> Result<(), Self::Error> {

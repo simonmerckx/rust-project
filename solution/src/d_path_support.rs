@@ -17,7 +17,7 @@
 //! or you want to explain your approach, write it down after the comments
 //! section. If you had no major issues and everything works, there is no need to write any comments.
 //!
-//! COMPLETED: ?
+//! COMPLETED: NO
 //!
 //! COMMENTS:
 //!

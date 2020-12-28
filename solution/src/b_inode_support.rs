@@ -21,33 +21,29 @@
 //!
 //! ...
 //!
-// import SuperBlock
+
+
 use cplfs_api::{fs::InodeSupport, types::{DInode, SuperBlock}};
-// import BlockSupport
 use cplfs_api::fs::BlockSupport;
 use cplfs_api::types::{Block, Inode};
 use cplfs_api::{controller::Device, error_given, fs::FileSysSupport, types::FType, types::{DINODE_SIZE}};
 use thiserror::Error;
 
 use crate::a_block_support::{self, CustomBlockFileSystem};
-/// You are free to choose the name for your file system. As we will use
-/// automated tests when grading your assignment, indicate here the name of
-/// your file system data type so we can just use `FSName` instead of
-/// having to manually figure out the name.
-/// **TODO**: replace the below type by the type of your file system
+
+/// Type of file system
 pub type FSName = CustomInodeFileSystem;
 
-// Custom type
 /// Custom file system data type
 pub struct CustomInodeFileSystem {
-    //device: Device,
     block_system: CustomBlockFileSystem,
+    // start of the inode region
     inode_start: u64,
+    // the amount of inodes per block in this file system
     nb_inodes_block: u64
 }
 
 impl CustomInodeFileSystem {
-
     /// Create a new CustomInodeFileSystem given a CustomBlockFileSystem
     pub fn new(blockfs: CustomBlockFileSystem, is: u64, nib: u64) -> CustomInodeFileSystem {
         CustomInodeFileSystem {  block_system: blockfs, inode_start: is, nb_inodes_block: nib }
@@ -57,15 +53,15 @@ impl CustomInodeFileSystem {
 #[derive(Error, Debug)]
 /// Custom type for errors in my implementation
 pub enum CustomInodeFileSystemError {
-    /// An error occured in the block layer
     #[error("BlockFileSystemError")]
+    /// An error occured in the block layer
     GivenError(#[from] a_block_support::CustomBlockFileSystemError),
     #[error("API error")]
     /// The input provided to some method in the controller layer was invalid
     APIError(#[from] error_given::APIError),
     #[error("The provided inode index is out of bounds")]
-    /// Error thrown when an index is greater than the number of 
-    /// inodes in the system.
+    /// Error thrown when an inode index is greater 
+    /// than the number of inodes in the system.
     InodeIndexOutOfBounds,
     #[error("The inode trying to be freed is already free")]
     /// Error thrown when the inode that is trying
@@ -74,7 +70,6 @@ pub enum CustomInodeFileSystemError {
     #[error("There is no free inode available")]
     /// Thrown when there is no free inode available
     NoFreeInode,
-
 }
 
 
@@ -85,9 +80,6 @@ impl FileSysSupport for CustomInodeFileSystem {
         return CustomBlockFileSystem::sb_valid(sb);
     }
 
-    // watch out for the inodes; an all-0 inode will not necessarily come out well during deserialization, 
-    // and probably needs to be overwritten by an actually free inode
-    // if you need to read/write multiple inodes in the same block, only load and store this block once!
     fn mkfs<P: AsRef<std::path::Path>>(path: P, sb: &SuperBlock) -> Result<Self, Self::Error> {
         let mut fs = CustomBlockFileSystem::mkfs(path, sb)?;
         let inodestart = sb.inodestart;
@@ -97,8 +89,7 @@ impl FileSysSupport for CustomInodeFileSystem {
         for x in 0..blocks{
             // The number of inodes does not 
             // necessarily have to fill up the entire region
-            let block_stop = x * nb_inodes_block;
-            
+            let block_stop = x * nb_inodes_block;         
             if block_stop > sb.ninodes {
                 break
             }
@@ -146,19 +137,7 @@ impl BlockSupport for CustomInodeFileSystem {
 
     fn b_free(&mut self, i: u64) -> Result<(), Self::Error> {
         let res = self.block_system.b_free(i)?;
-        return Ok(res)
-        //watch out; absolute indices
-        /* 
-        let res = match self.block_system.b_free(i) {
-            // Custom error so we can check in i_free
-            Err(CustomBlockFileSystemError::BlockIsAlreadyFree) => Err(CustomInodeFileSystemError::BlockIsAlreadyFree),
-            Err(e) => Err(e)?,
-            Ok(_) => Ok(())
-
-        };
-        println!("{:?}", res);
-        */
-        
+        return Ok(res)    
     }
 
     fn b_zero(&mut self, i: u64) -> Result<(), Self::Error> {
