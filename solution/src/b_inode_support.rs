@@ -109,8 +109,9 @@ impl FileSysSupport for CustomInodeFileSystem {
 
     fn mountfs(dev: Device) -> Result<Self, Self::Error> {
         let block_fs = CustomBlockFileSystem::mountfs(dev)?;
-        let nb_inodes_block = block_fs.superblock.block_size / *DINODE_SIZE;
-        let inode_start = block_fs.superblock.inodestart;
+        let sb = block_fs.sup_get()?;
+        let nb_inodes_block = sb.block_size / *DINODE_SIZE;
+        let inode_start = sb.inodestart;
         return Ok(CustomInodeFileSystem::new(block_fs,inode_start , nb_inodes_block));
     }
 
@@ -194,7 +195,6 @@ impl InodeSupport for CustomInodeFileSystem {
         
         if inode.disk_node.nlink == 0 {
             let file_blocks = inode.disk_node.direct_blocks;
-            println!("inode size {}", inode.disk_node.size );
             let nb_selected_blocks = (inode.disk_node.size as f64 / sb.block_size as f64).ceil();
             for index in 0..(nb_selected_blocks as i64){
                 let element = file_blocks[index as usize];
@@ -245,13 +245,12 @@ impl InodeSupport for CustomInodeFileSystem {
 }
 
 
-// **TODO** define your own tests here.
+// I tried running some of the b_tests, but with multiple
+// inode blocks (by defining a custom superblock)
 #[cfg(test)]
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
-    
     use std::path::PathBuf;
-
     use cplfs_api::{fs::{FileSysSupport, BlockSupport, InodeSupport}, types::{FType, InodeLike, SuperBlock}};
     use super::CustomInodeFileSystem;
     static BLOCK_SIZE: u64 = 300;
@@ -271,9 +270,33 @@ mod test_with_utils {
 
     #[path = "utils.rs"]
     mod utils;
+
+    // exact copy of original test
+    #[test]
+    fn mkfs_multiple_inode_blocks() {
+        let path = disk_prep_path("mkfs_multiple_inode_blocks");
+        //A working one
+        let my_fs = CustomInodeFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
+        let sb = my_fs.b_get(0).unwrap();
+        assert_eq!(
+            sb.deserialize_from::<SuperBlock>(0).unwrap(),
+            SUPERBLOCK_GOOD
+        );
+        assert_eq!(my_fs.sup_get().unwrap(), SUPERBLOCK_GOOD);
+
+        // Check proper init of inodes if they span multiple blocks
+        assert_eq!(my_fs.i_get(1).unwrap().get_ft(), FType::TFree); 
+        assert_eq!(my_fs.i_get(5).unwrap().get_ft(), FType::TFree);
+        assert!(my_fs.i_get(6).is_err());
+
+        let dev = my_fs.unmountfs();
+        utils::disk_destruct(dev);
+    }
+    
+    // slightly changed
     #[test]
     fn get_put_multiple_inode_blocks() {
-        let path = disk_prep_path("get_put");
+        let path = disk_prep_path("get_put_multiple_inode_blocks");
         let mut my_fs = CustomInodeFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
 
         // create inode that should be put in third block of inode allocated region
@@ -286,21 +309,109 @@ mod test_with_utils {
         )
         .unwrap();
 
-        // fetch block where this inode should be so we can check if correctly persisted
+        // fetch block where this inode should be so we can check if it is correctly persisted
         let b1 = my_fs.b_get(SUPERBLOCK_GOOD.inodestart + 2).unwrap();
-
         my_fs.i_put(&i1).unwrap();
         assert_eq!(my_fs.i_get(5).unwrap(), i1);
-
-        // 
         let dev = my_fs.unmountfs();
         assert_ne!(b1, dev.read_block(SUPERBLOCK_GOOD.inodestart +2).unwrap()); 
         utils::disk_destruct(dev);
-      
-
     }
 
+    #[test]
+    fn free_alloc_multiple_inode_blocks() {
+        let path = disk_prep_path("free_alloc_multiple_inode_blocks");
+        let mut my_fs = CustomInodeFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
     
+        //Allocate
+        for i in 0..(SUPERBLOCK_GOOD.ninodes - 1) {
+            assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 1); //Note; allocations starts from 1
+        }
+        let i1 = my_fs.i_get(2).unwrap();
+        assert_eq!(i1.get_ft(), FType::TFile);
+        assert_eq!(i1.get_size(), 0);
+        assert_eq!(i1.get_nlink(), 0);
+    
+        assert!(my_fs.i_alloc(FType::TDir).is_err());
+
+        my_fs.i_free(5).unwrap();
+        my_fs.i_free(2).unwrap();
+        assert_eq!(my_fs.i_get(2).unwrap().get_ft(), FType::TFree);
+        assert_eq!(my_fs.i_alloc(FType::TDir).unwrap(), 2);
+        assert_eq!(my_fs.i_get(2).unwrap().get_ft(), FType::TDir);
+
+        //Do nothing if inode has nlink neq to zero
+        let i1 = <<CustomInodeFileSystem as InodeSupport>::Inode as InodeLike>::new(
+            5,
+            &FType::TFile,
+            1,
+            (2.5 * (BLOCK_SIZE as f32)) as u64,
+            &[2, 3, 4],
+        )
+        .unwrap();
+
+        my_fs.i_put(&i1).unwrap();
+        assert!(my_fs.b_free(2).is_err());
+        assert_eq!(my_fs.i_get(5).unwrap().get_ft(), FType::TFile);
+
+        //Allocate blocks 5-6-7-8
+        for i in 0..4 {
+            assert_eq!(my_fs.b_alloc().unwrap(), i);
+        }
+
+        let i2 = <<CustomInodeFileSystem as InodeSupport>::Inode as InodeLike>::new(
+            4,
+            &FType::TFile,
+            0,
+            (1.5 * (BLOCK_SIZE as f32)) as u64,
+            &[7, 8],
+        )
+        .unwrap();
+
+        my_fs.i_put(&i2).unwrap();
+        my_fs.i_free(4).unwrap();
+        //Already freed
+        assert!(my_fs.b_free(2).is_err()); 
+        assert!(my_fs.b_free(3).is_err());
+
+        let dev = my_fs.unmountfs();
+        utils::disk_destruct(dev);
+    }
+
+    #[test]
+    fn itrunc_mutliple_inode_blocks() {
+        let path = disk_prep_path("itrunc_multiple_inode_blocks");
+        let mut my_fs = CustomInodeFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
+
+        //Allocate blocks 5-6-7-8-9
+        for i in 0..5 {
+            assert_eq!(my_fs.b_alloc().unwrap(), i);
+        }
+        let i2 = <<CustomInodeFileSystem as InodeSupport>::Inode as InodeLike>::new(
+            5,
+            &FType::TFile,
+            0,
+            (1.5 * (BLOCK_SIZE as f32)) as u64,
+            &[6, 7, 8],
+        )
+        .unwrap();
+        my_fs.i_put(&i2).unwrap();
+        let mut i3 = my_fs.i_get(5).unwrap();
+        my_fs.i_trunc(&mut i3).unwrap();
+        assert_eq!(my_fs.i_get(5).unwrap(), i3);
+        assert_eq!(i3.get_ft(), FType::TFile);
+        assert_eq!(i3.get_size(), 0);
+        assert_eq!(i3.get_nlink(), 0);
+
+        //Already freed
+        assert!(my_fs.b_free(1).is_err());
+        assert!(my_fs.b_free(2).is_err());
+        assert!(my_fs.b_free(3).is_ok()); //sneaky; not deallocated
+
+        let dev = my_fs.unmountfs();
+        utils::disk_destruct(dev);
+
+    }
 }
 
 

@@ -63,8 +63,10 @@ pub enum CustomInodeRWFileSystemError {
     #[error("Writing the contents of the buffer at the given offset would make the inode exceed it's maximum size")]
     /// Writing the contents of the provided buffer starting at 
     /// the given offset would make the inode exceed it's maximum size
-    WriteTooLarge
-
+    WriteTooLarge,
+    #[error("Inode has no room for extra block")]
+    /// Inode has no room for extra block
+    InodeBlocksFull
 }
 
 
@@ -233,8 +235,13 @@ impl InodeRWSupport for CustomInodeRWFileSystem {
             let remaining_bytes = (off + n) - inode.disk_node.size;
             let amount_of_new_blocks = (remaining_bytes as f64 / sb.block_size as f64).ceil();
             for i in 0..amount_of_new_blocks as u64 {
+                let index = current_amount_blocks + i as f64;
+                if index == inode.disk_node.direct_blocks.len() as f64{
+                    return Err(CustomInodeRWFileSystemError::InodeBlocksFull);
+
+                }
                 let new_block_index = sb.datastart + self.b_alloc()?;
-                inode.disk_node.direct_blocks[(current_amount_blocks + i as f64) as usize] = new_block_index;
+                inode.disk_node.direct_blocks[index as usize] = new_block_index;
             }
             inode.disk_node.size = off + n;
             self.i_put(inode)?;

@@ -63,7 +63,10 @@ pub enum CustomDirFileSystemError {
     InvalidEntryName,
     #[error("Inode corresponding to inum is not currently in use")]
     /// Inode corresponding to inum is not currently in use.
-    DirectoryInodeNotInUse
+    DirectoryInodeNotInUse,
+    #[error("Inode has no room for extra block")]
+    /// Inode has no room for extra block
+    InodeBlocksFull
 
 }
 
@@ -305,6 +308,10 @@ impl DirectorySupport for CustomDirFileSystem {
             }
         }
 
+        // inode has no room for extra block
+        if nb_selected_blocks == inode.disk_node.direct_blocks.len() as f64 {
+            return Err(CustomDirFileSystemError::InodeBlocksFull);
+        }
 
         // if we did not exit the function
         // allocate a new block
@@ -316,6 +323,9 @@ impl DirectorySupport for CustomDirFileSystem {
         // increase the size
         inode.disk_node.size += *DIRENTRY_SIZE;
         // find zero element and change it with index
+
+        
+        
         inode.disk_node.direct_blocks[nb_selected_blocks as usize] = new_block_index;
         // write inode back
         self.i_put(inode)?;
@@ -331,7 +341,19 @@ impl DirectorySupport for CustomDirFileSystem {
 }
 
 
-// **TODO** define your own tests here.
+
+#[cfg(test)]
+#[path = "../../api/fs-tests"]
+mod test_with_utils {
+    use std::path::PathBuf;
+
+    fn disk_prep_path(name: &str) -> PathBuf {
+        utils::disk_prep_path(&("fs-images-a-".to_string() + name), "img")
+    }
+
+    #[path = "utils.rs"]
+    mod utils;
+}
 
 // WARNING: DO NOT TOUCH THE BELOW CODE -- IT IS REQUIRED FOR TESTING -- YOU WILL LOSE POINTS IF I MANUALLY HAVE TO FIX YOUR TESTS
 #[cfg(all(test, any(feature = "c", feature = "all")))]
