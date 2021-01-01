@@ -246,19 +246,60 @@ impl InodeSupport for CustomInodeFileSystem {
 
 
 // **TODO** define your own tests here.
+#[cfg(test)]
+#[path = "../../api/fs-tests"]
 mod test_with_utils {
-    #[path = "utils.rs"]
-    mod utils;
-
+    
     use std::path::PathBuf;
 
-    use cplfs_api::{fs::{BlockSupport, FileSysSupport}, types::SuperBlock};
-    use super::CustomBlockFileSystem;
-    //use a_block_support::CustomBlockFileSystem;
+    use cplfs_api::{fs::{FileSysSupport, BlockSupport, InodeSupport}, types::{FType, InodeLike, SuperBlock}};
+    use super::CustomInodeFileSystem;
+    static BLOCK_SIZE: u64 = 300;
+    static SUPERBLOCK_GOOD: SuperBlock = SuperBlock {
+        block_size: BLOCK_SIZE,
+        nblocks: 10,
+        ninodes: 6,
+        inodestart: 1,
+        ndatablocks: 5,
+        bmapstart: 4,
+        datastart: 5,
+    };
+
     fn disk_prep_path(name: &str) -> PathBuf {
         utils::disk_prep_path(&("fs-images-a-".to_string() + name), "img")
     }
-    
+
+    #[path = "utils.rs"]
+    mod utils;
+    #[test]
+    fn get_put_multiple_inode_blocks() {
+        let path = disk_prep_path("get_put");
+        let mut my_fs = CustomInodeFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
+
+        // create inode that should be put in third block of inode allocated region
+        let i1 = <<CustomInodeFileSystem as InodeSupport>::Inode as InodeLike>::new(
+            5,
+            &FType::TFile,
+            0,
+            2 * BLOCK_SIZE,
+            &[2, 3],
+        )
+        .unwrap();
+
+        // fetch block where this inode should be so we can check if correctly persisted
+        let b1 = my_fs.b_get(SUPERBLOCK_GOOD.inodestart + 2).unwrap();
+
+        my_fs.i_put(&i1).unwrap();
+        assert_eq!(my_fs.i_get(5).unwrap(), i1);
+
+        // 
+        let dev = my_fs.unmountfs();
+        assert_ne!(b1, dev.read_block(SUPERBLOCK_GOOD.inodestart +2).unwrap()); 
+        utils::disk_destruct(dev);
+      
+
+    }
+
     
 }
 
