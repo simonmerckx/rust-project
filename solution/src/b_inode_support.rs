@@ -246,6 +246,22 @@ impl InodeSupport for CustomInodeFileSystem {
 
 
 // **TODO** define your own tests here.
+mod test_with_utils {
+    #[path = "utils.rs"]
+    mod utils;
+
+    use std::path::PathBuf;
+
+    use cplfs_api::{fs::{BlockSupport, FileSysSupport}, types::SuperBlock};
+    use super::CustomBlockFileSystem;
+    //use a_block_support::CustomBlockFileSystem;
+    fn disk_prep_path(name: &str) -> PathBuf {
+        utils::disk_prep_path(&("fs-images-a-".to_string() + name), "img")
+    }
+    
+    
+}
+
 
 // WARNING: DO NOT TOUCH THE BELOW CODE -- IT IS REQUIRED FOR TESTING -- YOU WILL LOSE POINTS IF I MANUALLY HAVE TO FIX YOUR TESTS
 #[cfg(all(test, any(feature = "b", feature = "all")))]

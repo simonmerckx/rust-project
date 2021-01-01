@@ -270,10 +270,90 @@ mod my_tests {
 #[cfg(test)]
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
+    use std::path::PathBuf;
+
+    use cplfs_api::{fs::{BlockSupport, FileSysSupport}, types::SuperBlock};
+    use super::CustomBlockFileSystem;
+    //use a_block_support::CustomBlockFileSystem;
+    fn disk_prep_path(name: &str) -> PathBuf {
+        utils::disk_prep_path(&("fs-images-a-".to_string() + name), "img")
+    }
+    
 
     #[path = "utils.rs"]
     mod utils;
 
+    #[test]
+    fn sb_valid() {
+        static BLOCK_SIZE: u64 = 1000;
+        static NBLOCKS: u64 = 10;
+        static SUPERBLOCK_BAD: SuperBlock = SuperBlock {
+            block_size: BLOCK_SIZE, //Note; assumes at least 2 inodes fit in one block. 
+            nblocks: NBLOCKS,
+            ninodes: 6,
+            inodestart: 1,
+            // too many data blocks
+            ndatablocks: 20,
+            bmapstart: 4,
+            datastart: 5,
+        };
+
+        // Too many data blocks for the bitmap to store
+        static SUPERBLOCK_BAD_2: SuperBlock = SuperBlock {
+            block_size: 120, //Note; assumes at least 1  inodes fit in one block.
+            nblocks: 1000,
+            ninodes: 3,
+            inodestart: 1,
+            // too many data blocks
+            ndatablocks: 995,
+            bmapstart: 4,
+            datastart: 5,
+        };
+
+        assert_eq!(CustomBlockFileSystem::sb_valid(&SUPERBLOCK_BAD), false);
+        assert_eq!(CustomBlockFileSystem::sb_valid(&SUPERBLOCK_BAD_2), false);
+    }
+
+    #[test]
+    fn free_alloc_multiple_bblocks() {
+        static SUPERBLOCK_GOOD: SuperBlock = SuperBlock {
+            block_size: 300, //Note; assumes at least 1 inodes fit in one block.
+            nblocks: 2500,
+            ninodes: 3,
+            inodestart: 1,
+            ndatablocks: 2494,
+            bmapstart: 4,
+            datastart: 6,
+        };
+
+        assert_eq!(CustomBlockFileSystem::sb_valid(&SUPERBLOCK_GOOD), true);   
+        let path = disk_prep_path("free_alloc_multiple_blocks");
+        let mut my_fs = CustomBlockFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
+        let mut byte: [u8; 1] = [0];
+        for i in 0..SUPERBLOCK_GOOD.ndatablocks {
+            assert_eq!(my_fs.b_alloc().unwrap(), i); //Fill up all data blocks
+        }
+        assert!(my_fs.b_alloc().is_err()); //No more blocks
+
+        //Check the bitmap in second block
+        let bb = my_fs.b_get(5).unwrap();
+        bb.read_data(&mut byte, 0).unwrap();
+        // everything here should be allocated in first byte
+        assert_eq!(byte[0], 0b1111_1111);
+        
+        //Deallocate fist block
+        my_fs.b_free(2400).unwrap();
+        assert!(my_fs.b_free(2400).is_err());
+
+        //Check the bitmap in second block
+        let bb = my_fs.b_get(5).unwrap();
+        bb.read_data(&mut byte, 0).unwrap();
+        assert_eq!(byte[0], 0b1111_1110);
+
+        let dev = my_fs.unmountfs();
+        utils::disk_destruct(dev);
+    }
+    
     #[test]
     fn unit_test() {
         //The below method set up the parent folder "a_parent_unique_name" within the root directory  of this solution crate
