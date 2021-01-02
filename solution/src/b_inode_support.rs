@@ -410,7 +410,6 @@ mod test_with_utils {
 
         let dev = my_fs.unmountfs();
         utils::disk_destruct(dev);
-
     }
 }
 

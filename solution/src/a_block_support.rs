@@ -331,31 +331,7 @@ mod test_with_utils {
 
         let dev = my_fs.unmountfs();
         utils::disk_destruct(dev);
-    }
-    
-    #[test]
-    fn unit_test() {
-        //The below method set up the parent folder "a_parent_unique_name" within the root directory  of this solution crate
-        //Also delete the file "image_file" within this folder if it already exists, so that it does not interfere with any later `mkfs` calls (this is useful if your previous test run failed, and the file did not get deleted)
-        //*WARNING* !Make sure that this folder name "a_parent_unique_name" is actually unique over different tests, because tests are executed in parallel by default!
-        //Returns the concatenated path, so that you can use the path further on, e.g. when creating a `Device` or `FileSystem`
-
-        //! `let path = utils::disk_prep_path("a_parent_unique_name", "image_file");`
-
-        //Things you want to test go here (check my tests in the API folder for examples)
-        //! ...
-        //! ...
-
-        // If some disk actually created the file under `path` in your code, then you can uncomment the following call to clean it up:
-        //!  `utils::disk_unprep_path(&path);`
-        // This removes the image file and the parent directory at the end, so that no garbage is left in your file system
-        //*WARNING* if a Device `dev` is still in scope for the path `path`, then the above call will block (the device holds a lock on the memory-mapped file)
-        //You then have to use the following call instead:
-
-        //! `utils::disk_destruct(dev);`
-
-        //This makes the device go out of scope first, before tearing down the parent folder and image file, thereby avoiding deadlock
-    }
+    }    
 }
 
 // Here we define a submodule, called `tests`, that will contain our unit tests

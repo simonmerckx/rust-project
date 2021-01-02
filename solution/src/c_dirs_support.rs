@@ -344,7 +344,7 @@ impl DirectorySupport for CustomDirFileSystem {
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
     use std::path::PathBuf;
-    use cplfs_api::{fs::{BlockSupport, DirectorySupport, FileSysSupport, InodeSupport}, types::{FType, InodeLike, SuperBlock}};
+    use cplfs_api::{fs::{BlockSupport, DirectorySupport, FileSysSupport, InodeSupport}, types::{DIRENTRY_SIZE, FType, InodeLike, SuperBlock}};
 
     use super::CustomDirFileSystem;
 
@@ -389,8 +389,10 @@ mod test_with_utils {
         for i in 0..3 {
             assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 2);
         }
+
+        let dir_entries_block = BLOCK_SIZE / *DIRENTRY_SIZE;
         // 45 direntries to fill a bloc, 3 blocks were assigned
-        for i in 0..135 {
+        for i in 0..(dir_entries_block *3) {
             let mut string = i.to_string();
             let front = "test";
             string.push_str(front);
@@ -400,11 +402,11 @@ mod test_with_utils {
         // at the start of the new block
         assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock", 2).unwrap(), 3000);
         // DIRENTRY = 22
-        assert_eq!(i2.disk_node.size, 3022);
-        assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock2", 2).unwrap(), 3022);
-        assert_eq!(i2.disk_node.size, 3044);
-        assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock3", 2).unwrap(), 3044);
-        assert_eq!(i2.disk_node.size, 3066);
+        assert_eq!(i2.disk_node.size, 3000 + *DIRENTRY_SIZE);
+        assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock2", 2).unwrap(), 3000 + *DIRENTRY_SIZE);
+        assert_eq!(i2.disk_node.size, 3000 + 2* *DIRENTRY_SIZE);
+        assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock3", 2).unwrap(),  3000 + 2* *DIRENTRY_SIZE);
+        assert_eq!(i2.disk_node.size,  3000 + 3* *DIRENTRY_SIZE);
         let dev = my_fs.unmountfs();
         utils::disk_destruct(dev);
     }
@@ -431,8 +433,10 @@ mod test_with_utils {
         for i in 0..3 {
             assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 2);
         }
+
+        let nb_inodes = 2500 / *DIRENTRY_SIZE;
         // fill up 2.5 block size
-        for i in 0..112 {
+        for i in 0..nb_inodes -1{
             let mut string = i.to_string();
             let front = "test";
             string.push_str(front);
