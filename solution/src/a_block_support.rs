@@ -244,27 +244,6 @@ impl BlockSupport for CustomBlockFileSystem {
     }
 }
 
-
-// Here we define a submodule, called `my_tests`, that will contain your unit
-// tests for this module.
-// **TODO** define your own tests here. I have written down one test as an example of the syntax.
-// You can define more tests in different modules, and change the name of this module
-//
-// The `test` in the `#[cfg(test)]` annotation ensures that this code is only compiled when we're testing the code.
-// To run these tests, run the command `cargo test` in the `solution` directory
-//
-// To learn more about testing, check the Testing chapter of the Rust
-// Book: https://doc.rust-lang.org/book/testing.html
-#[cfg(test)]
-mod my_tests {
-
-    #[test]
-    fn trivial_unit_test() {
-        assert_eq!(2, 2);
-        assert!(true);
-    }
-}
-
 // If you want to write more complicated tests that create actual files on your system, take a look at `utils.rs` in the assignment, and how it is used in the `fs_tests` folder to perform the tests. I have imported it below to show you how it can be used.
 // The `utils` folder has a few other useful methods too (nothing too crazy though, you might want to write your own utility functions, or use a testing framework in rust, if you want more advanced features)
 #[cfg(test)]

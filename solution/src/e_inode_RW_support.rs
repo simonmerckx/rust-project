@@ -24,11 +24,7 @@ use cplfs_api::{controller::Device, error_given::{self, APIError}, fs::{BlockSup
 
 use crate::b_inode_support::{self, CustomInodeFileSystem};
 
-/// You are free to choose the name for your file system. As we will use
-/// automated tests when grading your assignment, indicate here the name of
-/// your file system data type so we can just use `FSName` instead of
-/// having to manually figure out the name.
-/// **TODO**: replace the below type by the type of your file system
+/// Type of my file system
 pub type FSName = CustomInodeRWFileSystem;
 
 // Custom type
@@ -238,7 +234,6 @@ impl InodeRWSupport for CustomInodeRWFileSystem {
                 let index = current_amount_blocks + i as f64;
                 if index == inode.disk_node.direct_blocks.len() as f64{
                     return Err(CustomInodeRWFileSystemError::InodeBlocksFull);
-
                 }
                 let new_block_index = sb.datastart + self.b_alloc()?;
                 inode.disk_node.direct_blocks[index as usize] = new_block_index;
@@ -300,6 +295,7 @@ impl InodeRWSupport for CustomInodeRWFileSystem {
 }
 
 
+
 #[cfg(test)]
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
@@ -356,10 +352,10 @@ mod test_with_utils {
         assert_eq!(buf50.contents_as_ref()[..], read_result_2[..]);
         let dev = my_fs.unmountfs();
         utils::disk_destruct(dev);
-
-
     }
 }
+
+
 
 // WARNING: DO NOT TOUCH THE BELOW CODE -- IT IS REQUIRED FOR TESTING -- YOU WILL LOSE POINTS IF I MANUALLY HAVE TO FIX YOUR TESTS
 #[cfg(all(test, any(feature = "e", feature = "all")))]

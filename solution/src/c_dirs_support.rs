@@ -22,11 +22,7 @@ use cplfs_api::{controller::Device, error_given, fs::{BlockSupport, DirectorySup
 use thiserror::Error;
 use crate::b_inode_support::{self, CustomInodeFileSystem};
 
-/// You are free to choose the name for your file system. As we will use
-/// automated tests when grading your assignment, indicate here the name of
-/// your file system data type so we can just use `FSName` instead of
-/// having to manually figure out the name.
-/// **TODO**: replace the below type by the type of your file system
+/// Type of my file system
 pub type FSName = CustomDirFileSystem;
 
 // Custom type
@@ -375,7 +371,6 @@ mod test_with_utils {
     fn dirlookup_link_new_block() {
         let path = disk_prep_path("lkup_link_new_block");
         let mut my_fs = CustomDirFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
-
         let mut i2 = <<CustomDirFileSystem as InodeSupport>::Inode as InodeLike>::new(
             5,
             &FType::TDir,
@@ -415,7 +410,7 @@ mod test_with_utils {
     }
 
     #[test]
-    fn dirlookup_extend_block() {
+    fn dirlookup_link_extend_block() {
         let path = disk_prep_path("lkup_link_extend_block");
         let mut my_fs = CustomDirFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
 
