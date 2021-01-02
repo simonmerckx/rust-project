@@ -300,7 +300,66 @@ impl InodeRWSupport for CustomInodeRWFileSystem {
 }
 
 
-// **TODO** define your own tests here.
+#[cfg(test)]
+#[path = "../../api/fs-tests"]
+mod test_with_utils {
+    use std::path::PathBuf;
+    use cplfs_api::{fs::{BlockSupport, FileSysSupport, InodeRWSupport, InodeSupport}, types::{Buffer, FType, InodeLike, SuperBlock}};
+
+    use super::CustomInodeRWFileSystem;
+
+    fn disk_prep_path(name: &str) -> PathBuf {
+        utils::disk_prep_path(&("fs-images-a-".to_string() + name), "img")
+    }
+    static BLOCK_SIZE: u64 = 300; //make blocks somewhat smaller on this one, should still be sufficient for a reasonable inode
+    static NBLOCKS: u64 = 11;
+    static SUPERBLOCK_GOOD: SuperBlock = SuperBlock {
+        block_size: BLOCK_SIZE,
+        nblocks: NBLOCKS,
+        ninodes: 6,
+        inodestart: 1,
+        ndatablocks: 6,
+        bmapstart: 4,
+        datastart: 5,
+    };
+
+    #[path = "utils.rs"]
+    mod utils;
+
+    #[test]
+    fn readi_buff_small() {
+        let path = disk_prep_path("readi_buff_small");
+        let mut my_fs = CustomInodeRWFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
+
+        //Set up an inode with 3 blocks first
+        for i in 0..5 {
+            assert_eq!(my_fs.b_alloc().unwrap(), i);
+        }
+        let b2 = utils::n_block(5, BLOCK_SIZE, 2);
+        my_fs.b_put(&b2).unwrap();
+        let  i2 = <<CustomInodeRWFileSystem as InodeSupport>::Inode as InodeLike>::new(
+            2,
+            &FType::TFile,
+            0,
+            (2.5 * (BLOCK_SIZE as f32)) as u64, //size is 750
+            &[5, 6, 7],
+        )
+        .unwrap();
+        my_fs.i_put(&i2).unwrap(); //Store the inode to disk as well
+        // buffer of size 50
+        let mut buf50 = Buffer::new_zero(50);
+        // n larger than the size of the buffer, but when buffer is full
+        // we should stop
+        assert_eq!(my_fs.i_read(&i2, &mut buf50, 0, 200).unwrap(), 50);
+        let read_result_2 = vec![2; 50];
+        // we read from the start
+        assert_eq!(buf50.contents_as_ref()[..], read_result_2[..]);
+        let dev = my_fs.unmountfs();
+        utils::disk_destruct(dev);
+
+
+    }
+}
 
 // WARNING: DO NOT TOUCH THE BELOW CODE -- IT IS REQUIRED FOR TESTING -- YOU WILL LOSE POINTS IF I MANUALLY HAVE TO FIX YOUR TESTS
 #[cfg(all(test, any(feature = "e", feature = "all")))]

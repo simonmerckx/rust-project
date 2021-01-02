@@ -292,7 +292,6 @@ impl DirectorySupport for CustomDirFileSystem {
                     // because this should be taken inot account aswell
                     if dir_entry.inum == 0 || ((superblock.block_size*index) + offset + *DIRENTRY_SIZE) >= inode.disk_node.size {
                         if (superblock.block_size*index + offset + *DIRENTRY_SIZE) >= inode.disk_node.size {
-                            println!("ERIIIN");
                             inode.disk_node.size = superblock.block_size*index + offset + *DIRENTRY_SIZE;
                             self.i_put(&inode)?;
                         }
@@ -334,8 +333,8 @@ impl DirectorySupport for CustomDirFileSystem {
         self.i_put(inode)?;
         // put the block back on disk
         self.b_put(&new_block)?;
-        corresponding_inode = self.i_get(inum)?;
-        if !(corresponding_inode.inum == inum) {
+        //corresponding_inode = self.i_get(inum)?;
+        if !(inode.inum == inum) {
             corresponding_inode.disk_node.nlink += 1;
             self.i_put(&corresponding_inode)?;      
         } 
@@ -382,21 +381,19 @@ mod test_with_utils {
             &FType::TDir,
             0,
             (2.5 * (BLOCK_SIZE as f32)) as u64,
-            &[6, 7, 8], //All of these blocks are initially 0'ed -> free direntries
+            &[5, 6, 7], //All of these blocks are initially 0'ed -> free direntries
         )
         .unwrap();
         my_fs.i_put(&i2).unwrap();
 
         //Allocate blocks 5-6-7
-        for i in 0..3 {
+        for i in 0..4 {
             assert_eq!(my_fs.b_alloc().unwrap(), i);
         }
-
         //Allocate inodes 2,3,4
         for i in 0..3 {
             assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 2);
         }
-
         // 45 direntries to fill a bloc, 3 blocks were assigned
         for i in 0..135 {
             let mut string = i.to_string();
@@ -404,12 +401,15 @@ mod test_with_utils {
             string.push_str(front);
             let _res = my_fs.dirlink(&mut i2, &string, 2).unwrap();
         }
-
         // a new block should be allocated now, the dir entry should begin 
         // at the start of the new block
         assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock", 2).unwrap(), 3000);
         // DIRENTRY = 22
         assert_eq!(i2.disk_node.size, 3022);
+        assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock2", 2).unwrap(), 3022);
+        assert_eq!(i2.disk_node.size, 3044);
+        assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock3", 2).unwrap(), 3044);
+        assert_eq!(i2.disk_node.size, 3066);
         let dev = my_fs.unmountfs();
         utils::disk_destruct(dev);
     }
@@ -424,21 +424,18 @@ mod test_with_utils {
             &FType::TDir,
             0,
             (2.5 * (BLOCK_SIZE as f32)) as u64,
-            &[6, 7, 8], //All of these blocks are initially 0'ed -> free direntries
+            &[5, 6, 7], //All of these blocks are initially 0'ed -> free direntries
         )
         .unwrap();
         my_fs.i_put(&i2).unwrap();
-
-         //Allocate blocks 5-6-7
-         for i in 0..3 {
+        //Allocate blocks 5-6-7
+        for i in 0..3 {
             assert_eq!(my_fs.b_alloc().unwrap(), i);
         }
-
         //Allocate inodes 2,3,4
         for i in 0..3 {
             assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 2);
         }
-
         // fill up 2.5 block size
         for i in 0..112 {
             let mut string = i.to_string();
@@ -447,6 +444,7 @@ mod test_with_utils {
             let _res = my_fs.dirlink(&mut i2, &string, 2).unwrap();
         }
 
+        // can start here if size is extended
         assert_eq!(my_fs.dirlink(&mut i2, "extendblock", 2).unwrap(), 2484);
         // size should be extended
         assert_eq!(i2.disk_node.size, 2506);
@@ -456,11 +454,9 @@ mod test_with_utils {
         assert_eq!(i2.disk_node.size, 2550);
         let dev = my_fs.unmountfs();
         utils::disk_destruct(dev);
-
-
-
     }
 }
+
 
 // WARNING: DO NOT TOUCH THE BELOW CODE -- IT IS REQUIRED FOR TESTING -- YOU WILL LOSE POINTS IF I MANUALLY HAVE TO FIX YOUR TESTS
 #[cfg(all(test, any(feature = "c", feature = "all")))]
