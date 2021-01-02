@@ -275,12 +275,12 @@ impl DirectorySupport for CustomDirFileSystem {
         let superblock = self.sup_get()?;
         let file_blocks = inode.disk_node.direct_blocks;
         let nb_selected_blocks = (inode.disk_node.size as f64/superblock.block_size as f64).ceil(); 
+        let nb_dirs = superblock.block_size/ *DIRENTRY_SIZE;
         for index in 0..(nb_selected_blocks as u64) {
             let element = file_blocks[index as usize];
             if !(element == 0) {
                 // b-get: read the nth block of the entire disk and return it
                 let mut block = self.b_get(element)?;
-                let nb_dirs = superblock.block_size/ *DIRENTRY_SIZE;
                 let mut offset = 0 ;
                 for _ in 0..(nb_dirs) {
                     let dir_entry = block.deserialize_from::<DirEntry>(offset)?;
@@ -288,21 +288,27 @@ impl DirectorySupport for CustomDirFileSystem {
                     // we might be over the size of the inode
                     // but there might still place in this block 
                     // to add a dir entry
-                    if dir_entry.inum == 0 || offset >= inode.disk_node.size {
-                        if offset >= inode.disk_node.size {
-                            inode.disk_node.size += *DIRENTRY_SIZE;
+                    // here we need to do offset + DIRENTRY SIZE
+                    // because this should be taken inot account aswell
+                    if dir_entry.inum == 0 || ((superblock.block_size*index) + offset + *DIRENTRY_SIZE) >= inode.disk_node.size {
+                        if (superblock.block_size*index + offset + *DIRENTRY_SIZE) >= inode.disk_node.size {
+                            println!("ERIIIN");
+                            inode.disk_node.size = superblock.block_size*index + offset + *DIRENTRY_SIZE;
                             self.i_put(&inode)?;
                         }
-                        block.serialize_into(&new_dir_entry, offset)?;  
-                        // write block back to disk
-                        self.b_put(&block)?;
-                        // if inum and inode's number are equal, then nothing happens
-                        if !(inode.inum == inum) {
-                            corresponding_inode.disk_node.nlink += 1;
-                            self.i_put(&corresponding_inode)?;      
-                        } 
-                        return Ok(superblock.block_size*index + offset);
+                        if dir_entry.inum == 0 {
+                            block.serialize_into(&new_dir_entry, offset)?;  
+                            // write block back to disk
+                            self.b_put(&block)?;
+                            // if inum and inode's number are equal, then nothing happens
+                            if !(inode.inum == inum) {
+                                corresponding_inode.disk_node.nlink += 1;
+                                self.i_put(&corresponding_inode)?;      
+                            } 
+                            return Ok(superblock.block_size*index + offset);
+                        }
                     }
+                    // keeps the last starting offset
                     offset +=  *DIRENTRY_SIZE;           
                 }
             }
@@ -321,11 +327,8 @@ impl DirectorySupport for CustomDirFileSystem {
         // we start at the beginning of the block
         new_block.serialize_into(&new_dir_entry, 0)?;  
         // increase the size
-        inode.disk_node.size += *DIRENTRY_SIZE;
+        inode.disk_node.size = (superblock.block_size * (nb_selected_blocks as u64)) + *DIRENTRY_SIZE;
         // find zero element and change it with index
-
-        
-        
         inode.disk_node.direct_blocks[nb_selected_blocks as usize] = new_block_index;
         // write inode back
         self.i_put(inode)?;
@@ -336,7 +339,7 @@ impl DirectorySupport for CustomDirFileSystem {
             corresponding_inode.disk_node.nlink += 1;
             self.i_put(&corresponding_inode)?;      
         } 
-        return Ok(inode.disk_node.size -  *DIRENTRY_SIZE);       
+        return Ok(superblock.block_size * (nb_selected_blocks as u64));       
     }
 }
 
@@ -346,6 +349,9 @@ impl DirectorySupport for CustomDirFileSystem {
 #[path = "../../api/fs-tests"]
 mod test_with_utils {
     use std::path::PathBuf;
+    use cplfs_api::{fs::{BlockSupport, DirectorySupport, FileSysSupport, InodeSupport}, types::{FType, InodeLike, SuperBlock}};
+
+    use super::CustomDirFileSystem;
 
     fn disk_prep_path(name: &str) -> PathBuf {
         utils::disk_prep_path(&("fs-images-a-".to_string() + name), "img")
@@ -353,6 +359,107 @@ mod test_with_utils {
 
     #[path = "utils.rs"]
     mod utils;
+
+    static BLOCK_SIZE: u64 = 1000;
+    static NBLOCKS: u64 = 10;
+    static SUPERBLOCK_GOOD: SuperBlock = SuperBlock {
+        block_size: BLOCK_SIZE,
+        nblocks: NBLOCKS,
+        ninodes: 8,
+        inodestart: 1,
+        ndatablocks: 5,
+        bmapstart: 4,
+        datastart: 5,
+    };
+
+    #[test]
+    fn dirlookup_link_new_block() {
+        let path = disk_prep_path("lkup_link_new_block");
+        let mut my_fs = CustomDirFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
+
+        let mut i2 = <<CustomDirFileSystem as InodeSupport>::Inode as InodeLike>::new(
+            5,
+            &FType::TDir,
+            0,
+            (2.5 * (BLOCK_SIZE as f32)) as u64,
+            &[6, 7, 8], //All of these blocks are initially 0'ed -> free direntries
+        )
+        .unwrap();
+        my_fs.i_put(&i2).unwrap();
+
+        //Allocate blocks 5-6-7
+        for i in 0..3 {
+            assert_eq!(my_fs.b_alloc().unwrap(), i);
+        }
+
+        //Allocate inodes 2,3,4
+        for i in 0..3 {
+            assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 2);
+        }
+
+        // 45 direntries to fill a bloc, 3 blocks were assigned
+        for i in 0..135 {
+            let mut string = i.to_string();
+            let front = "test";
+            string.push_str(front);
+            let _res = my_fs.dirlink(&mut i2, &string, 2).unwrap();
+        }
+
+        // a new block should be allocated now, the dir entry should begin 
+        // at the start of the new block
+        assert_eq!(my_fs.dirlink(&mut i2, "nieuweblock", 2).unwrap(), 3000);
+        // DIRENTRY = 22
+        assert_eq!(i2.disk_node.size, 3022);
+        let dev = my_fs.unmountfs();
+        utils::disk_destruct(dev);
+    }
+
+    #[test]
+    fn dirlookup_extend_block() {
+        let path = disk_prep_path("lkup_link_extend_block");
+        let mut my_fs = CustomDirFileSystem::mkfs(&path, &SUPERBLOCK_GOOD).unwrap();
+
+        let mut i2 = <<CustomDirFileSystem as InodeSupport>::Inode as InodeLike>::new(
+            5,
+            &FType::TDir,
+            0,
+            (2.5 * (BLOCK_SIZE as f32)) as u64,
+            &[6, 7, 8], //All of these blocks are initially 0'ed -> free direntries
+        )
+        .unwrap();
+        my_fs.i_put(&i2).unwrap();
+
+         //Allocate blocks 5-6-7
+         for i in 0..3 {
+            assert_eq!(my_fs.b_alloc().unwrap(), i);
+        }
+
+        //Allocate inodes 2,3,4
+        for i in 0..3 {
+            assert_eq!(my_fs.i_alloc(FType::TFile).unwrap(), i + 2);
+        }
+
+        // fill up 2.5 block size
+        for i in 0..112 {
+            let mut string = i.to_string();
+            let front = "test";
+            string.push_str(front);
+            let _res = my_fs.dirlink(&mut i2, &string, 2).unwrap();
+        }
+
+        assert_eq!(my_fs.dirlink(&mut i2, "extendblock", 2).unwrap(), 2484);
+        // size should be extended
+        assert_eq!(i2.disk_node.size, 2506);
+        assert_eq!(my_fs.dirlink(&mut i2, "extendblock2", 2).unwrap(), 2506);
+        assert_eq!(i2.disk_node.size, 2528);
+        assert_eq!(my_fs.dirlink(&mut i2, "extendblock3", 2).unwrap(), 2528);
+        assert_eq!(i2.disk_node.size, 2550);
+        let dev = my_fs.unmountfs();
+        utils::disk_destruct(dev);
+
+
+
+    }
 }
 
 // WARNING: DO NOT TOUCH THE BELOW CODE -- IT IS REQUIRED FOR TESTING -- YOU WILL LOSE POINTS IF I MANUALLY HAVE TO FIX YOUR TESTS

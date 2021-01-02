@@ -209,7 +209,7 @@ impl InodeSupport for CustomInodeFileSystem {
         return Ok(())
     }
 
-    fn i_alloc(&mut self, ft: cplfs_api::types::FType) -> Result<u64, Self::Error> {
+    fn i_alloc(&mut self, ft: FType) -> Result<u64, Self::Error> {
         let sb = self.sup_get()?;
         let ninodes = sb.ninodes;
         // The inode with index 0 should never be allocated.
